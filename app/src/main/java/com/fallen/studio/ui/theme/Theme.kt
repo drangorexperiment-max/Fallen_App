@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
  * Дополнительные цвета Fallen, которых нет в Material3 ColorScheme.
  */
 data class FallenColors(
+    val appBackground: Color,
     val canvasBackground: Color,
     val gridLine: Color,
     val selection: Color,
@@ -20,27 +21,46 @@ data class FallenColors(
     val danger: Color,
     val warning: Color,
     val surfaceElevated: Color,
-    val borderSubtle: Color,
+    val divider: Color,
     val borderStrong: Color,
     val textSecondary: Color,
     val textTertiary: Color,
+    val textDisabled: Color,
 )
 
-val LocalFallenColors = staticCompositionLocalOf {
-    FallenColors(
-        canvasBackground = CanvasDark,
-        gridLine = GridLineDark,
-        selection = SelectionColor,
-        success = AccentSuccess,
-        danger = AccentDanger,
-        warning = AccentWarning,
-        surfaceElevated = Dark3,
-        borderSubtle = Dark4,
-        borderStrong = Dark5,
-        textSecondary = TextSecondaryDark,
-        textTertiary = TextTertiaryDark,
-    )
-}
+private val DarkFallenColors = FallenColors(
+    appBackground = Dark1,
+    canvasBackground = CanvasDark,
+    gridLine = GridLineDark,
+    selection = SelectionColor,
+    success = AccentSuccess,
+    danger = AccentDanger,
+    warning = AccentWarning,
+    surfaceElevated = Dark3,
+    divider = Dark4,
+    borderStrong = Dark5,
+    textSecondary = TextSecondaryDark,
+    textTertiary = TextTertiaryDark,
+    textDisabled = TextTertiaryDark.copy(alpha = 0.6f),
+)
+
+private val LightFallenColors = FallenColors(
+    appBackground = Light0,
+    canvasBackground = CanvasLight,
+    gridLine = GridLineLight,
+    selection = SelectionColor,
+    success = AccentSuccess,
+    danger = AccentDanger,
+    warning = AccentWarning,
+    surfaceElevated = Light1,
+    divider = Light3,
+    borderStrong = Light4,
+    textSecondary = TextSecondaryLight,
+    textTertiary = TextTertiaryLight,
+    textDisabled = TextTertiaryLight.copy(alpha = 0.6f),
+)
+
+val LocalFallenColors = staticCompositionLocalOf { DarkFallenColors }
 
 private val DarkColorScheme = darkColorScheme(
     primary = Violet500,
@@ -80,34 +100,6 @@ private val LightColorScheme = lightColorScheme(
     onError = Color.White,
 )
 
-private val DarkFallenColors = FallenColors(
-    canvasBackground = CanvasDark,
-    gridLine = GridLineDark,
-    selection = SelectionColor,
-    success = AccentSuccess,
-    danger = AccentDanger,
-    warning = AccentWarning,
-    surfaceElevated = Dark3,
-    borderSubtle = Dark4,
-    borderStrong = Dark5,
-    textSecondary = TextSecondaryDark,
-    textTertiary = TextTertiaryDark,
-)
-
-private val LightFallenColors = FallenColors(
-    canvasBackground = CanvasLight,
-    gridLine = GridLineLight,
-    selection = SelectionColor,
-    success = AccentSuccess,
-    danger = AccentDanger,
-    warning = AccentWarning,
-    surfaceElevated = Light2,
-    borderSubtle = Light3,
-    borderStrong = Light4,
-    textSecondary = TextSecondaryLight,
-    textTertiary = TextTertiaryLight,
-)
-
 @Composable
 fun FallenTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -125,8 +117,12 @@ fun FallenTheme(
     }
 }
 
-/** Быстрый доступ к расширенным цветам: `FallenTheme.colors.canvasBackground` */
-object FallenThemeAccess {
+/**
+ * Быстрый доступ к расширенным цветам: `FallenTheme.colors.canvasBackground`.
+ * Объект и composable-функция с одним именем сосуществуют в Kotlin,
+ * так как находятся в разных пространствах имён.
+ */
+object FallenTheme {
     val colors: FallenColors
         @Composable get() = LocalFallenColors.current
 }
