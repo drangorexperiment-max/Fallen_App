@@ -34,4 +34,33 @@ object ColorUtils {
         val b = (color.blue * 255).toInt().coerceIn(0, 255)
         return "#%02X%02X%02X".format(r, g, b)
     }
+
+    /** Псевдоним parseHex с фолбэком по умолчанию. */
+    fun parse(hex: String?, fallback: Color = Color.Black): Color = parseHex(hex, fallback)
+
+    /** Парсит hex или возвращает null при ошибке. */
+    fun parseOrNull(hex: String?): Color? {
+        if (hex.isNullOrBlank()) return null
+        val sentinel = Color(0x01010101)
+        val parsed = parseHex(hex, sentinel)
+        return if (parsed == sentinel) null else parsed
+    }
+
+    /** Возвращает оттенок (hue, 0..360) для hex-цвета. */
+    fun hueOf(hex: String?): Float {
+        val c = parse(hex, Color.Red)
+        val r = c.red
+        val g = c.green
+        val b = c.blue
+        val max = maxOf(r, g, b)
+        val min = minOf(r, g, b)
+        val delta = max - min
+        if (delta == 0f) return 0f
+        val hue = when (max) {
+            r -> 60f * (((g - b) / delta) % 6f)
+            g -> 60f * (((b - r) / delta) + 2f)
+            else -> 60f * (((r - g) / delta) + 4f)
+        }
+        return if (hue < 0f) hue + 360f else hue
+    }
 }
