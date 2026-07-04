@@ -9,6 +9,21 @@ __v0_jsx-dev-runtime.ts
 # Environment variables
 .env*.local
 
+# Android / Gradle
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+*.apk
+*.aab
+!*-release.apk
+
 # Common ignores
 node_modules
 .next/
