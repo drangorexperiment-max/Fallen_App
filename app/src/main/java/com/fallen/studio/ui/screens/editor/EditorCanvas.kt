@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -420,7 +421,7 @@ private inline fun androidx.compose.ui.graphics.drawscope.DrawScope.drawIntoCanv
     alpha: Float,
     crossinline block: (androidx.compose.ui.graphics.Canvas) -> Unit,
 ) {
-    androidx.compose.ui.graphics.drawscope.drawIntoCanvas { canvas ->
+    drawIntoCanvas { canvas ->
         if (alpha < 1f) {
             val paint = android.graphics.Paint().apply {
                 this.alpha = (alpha * 255).toInt()

@@ -14,15 +14,18 @@ import java.io.ByteArrayOutputStream
 object ImageUtils {
 
     /** Декодирует data URL ("data:image/png;base64,....") в Bitmap. */
-    fun decodeDataUrl(dataUrl: String): Bitmap? = try {
-        val base64Part = dataUrl.substringAfter("base64,", "")
-        if (base64Part.isEmpty()) null
-        else {
-            val bytes = Base64.decode(base64Part, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    fun decodeDataUrl(dataUrl: String?): Bitmap? {
+        if (dataUrl.isNullOrBlank()) return null
+        return try {
+            val base64Part = dataUrl.substringAfter("base64,", "")
+            if (base64Part.isEmpty()) null
+            else {
+                val bytes = Base64.decode(base64Part, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
+        } catch (_: Exception) {
+            null
         }
-    } catch (_: Exception) {
-        null
     }
 
     /** Кодирует Bitmap в data URL PNG (для сохранения в .uiproj-совместимом формате). */
