@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.fallen.studio.data.ProjectSerializer
 import com.fallen.studio.data.model.FallenProject
 import com.fallen.studio.export.ExportEngine
 import com.fallen.studio.export.ExportFormat
@@ -104,6 +106,20 @@ fun ExportPanel(
         if (uri != null) {
             val ok = ImageExporter.exportToUri(context, project, uri, imageScale, transparentBg)
             onToast(if (ok) "PNG сохранён" else "Ошибка экспорта PNG")
+        }
+    }
+
+    // SAF: экспорт файла проекта (.uiproj) для передачи другим людям
+    val saveProjectLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(ProjectSerializer.encode(project).toByteArray())
+                }
+                onToast("Файл проекта сохранён")
+            }.onFailure { onToast("Не удалось сохранить файл проекта") }
         }
     }
 
@@ -279,6 +295,30 @@ fun ExportPanel(
             Icon(Icons.Outlined.Image, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text("Сохранить PNG")
+        }
+
+        // ---------- Файл проекта ----------
+        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        PanelSectionTitle("Файл проекта")
+        Text(
+            text = "Сохраните проект в файл .uiproj, чтобы передать другому человеку — он импортирует его на главном экране.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+        FilledTonalButton(
+            onClick = {
+                saveProjectLauncher.launch("${project.name.ifBlank { "project" }}.uiproj")
+            },
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .height(46.dp)
+        ) {
+            Icon(Icons.Outlined.FolderZip, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Экспорт проекта (.uiproj)")
         }
     }
 }

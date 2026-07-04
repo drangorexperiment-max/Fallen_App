@@ -1,5 +1,7 @@
 package com.fallen.studio.ui.screens.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,7 +23,9 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Brush
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.GridOn
@@ -45,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,15 +63,15 @@ import com.fallen.studio.ui.theme.FallenTheme
 
 private enum class SettingsTab(val title: String, val icon: ImageVector) {
     APPEARANCE("Внешний вид", Icons.Outlined.Brush),
-    CANVAS("Канвас", Icons.Outlined.GridOn),
+    CANVAS("Холст", Icons.Outlined.GridOn),
     EDITOR("Редактор", Icons.Outlined.Tune),
     EXPORT("Экспорт", Icons.Outlined.Code),
     ABOUT("О приложении", Icons.Outlined.Info),
 }
 
 /**
- * Экран настроек Fallen с вкладками (пункт 3 требований):
- * Внешний вид / Канвас / Редактор / Экспорт / О приложении.
+ * Экран настроек Fallen с вкладками:
+ * Внешний вид / Холст / Редактор / Экспорт / О приложении.
  */
 @Composable
 fun SettingsScreen(
@@ -295,6 +300,33 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
             description = "Элементы прилипают к линиям сетки при перемещении",
             checked = settings.snapToGrid,
             onCheckedChange = vm::setSnapToGrid,
+        )
+    }
+    item { PanelSectionTitle("Привязка (Snap)") }
+    item {
+        SwitchRow(
+            label = "Магнитная привязка",
+            description = "Элементы примагничиваются к центру и краям холста, к границам других элементов",
+            checked = settings.snapEnabled,
+            onCheckedChange = vm::setSnapEnabled,
+        )
+    }
+    item {
+        SliderRow(
+            label = "Чувствительность к холсту",
+            value = settings.snapCanvasSensitivity.toFloat(),
+            valueRange = 3f..50f,
+            valueLabel = { "${it.toInt()} px" },
+            onValueChange = { vm.setSnapCanvasSensitivity(it.toInt()) },
+        )
+    }
+    item {
+        SliderRow(
+            label = "Чувствительность к границам элементов",
+            value = settings.snapElementsSensitivity.toFloat(),
+            valueRange = 2f..30f,
+            valueLabel = { "${it.toInt()} px" },
+            onValueChange = { vm.setSnapElementsSensitivity(it.toInt()) },
         )
     }
     item { PanelSectionTitle("Направляющие") }
@@ -541,7 +573,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutTab() {
                 color = FallenTheme.colors.textSecondary,
             )
             Text(
-                text = "Редактор расстановки UI-элементов и ассетов.\nСоздавайте макеты, экспортируйте координаты\nв Unity, JSON, CSV и другие форматы.",
+                text = "Мобильная студия дизайна игровых интерфейсов.\nРасставляйте ассеты и текст на холсте, настраивайте\nстили и экспортируйте готовые макеты в код.",
                 fontSize = 13.sp,
                 color = FallenTheme.colors.textSecondary,
                 lineHeight = 20.sp,
@@ -552,12 +584,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutTab() {
     item { PanelSectionTitle("Возможности") }
     item {
         val features = listOf(
-            "Импорт проектов из UI Studio Pro (.uiproj)",
+            "Работа с ассетами: импорт изображений, слои, дублирование",
+            "Текст с обводкой, тенью и своими шрифтами (.ttf/.otf)",
+            "Магнитная привязка и привязка к сетке",
+            "Экспорт координат в Unity C#, JSON, CSV, XML и текст",
+            "Экспорт макета в PNG-изображение",
+            "Экспорт и импорт файлов проекта для обмена",
             "Откат и возврат изменений (undo/redo)",
-            "Тень текста, работающая вместе с обводкой",
-            "Экспорт в 5 форматов + PNG-изображение",
-            "Светлая и тёмная темы",
-            "Автосохранение черновика",
+            "Автосохранение и светлая/тёмная темы",
         )
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             features.forEach { f ->
@@ -576,6 +610,63 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutTab() {
                     )
                 }
             }
+        }
+    }
+    item { PanelSectionTitle("Мы на связи") }
+    item {
+        val context = LocalContext.current
+        val colors = FallenTheme.colors
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.surfaceElevated)
+                .border(1.dp, colors.divider, RoundedCornerShape(14.dp))
+                .clickable {
+                    val intent = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://t.me/Fallen_OfficialGroup"),
+                    )
+                    runCatching { context.startActivity(intent) }
+                }
+                .padding(14.dp),
+        ) {
+            // Иконка Telegram (бумажный самолётик)
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(androidx.compose.ui.graphics.Color(0xFF229ED9)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = null,
+                    tint = androidx.compose.ui.graphics.Color.White,
+                    modifier = Modifier.size(20.dp).padding(start = 2.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Telegram",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "Официальная группа Fallen",
+                    fontSize = 12.sp,
+                    color = colors.textSecondary,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Outlined.OpenInNew,
+                contentDescription = "Открыть",
+                tint = colors.textSecondary,
+                modifier = Modifier.size(18.dp),
+            )
         }
     }
 }

@@ -23,6 +23,9 @@ data class AppSettings(
     val gridEnabled: Boolean = true,
     val gridSize: Int = 50,
     val snapToGrid: Boolean = false,
+    val snapEnabled: Boolean = true,
+    val snapCanvasSensitivity: Int = 12,
+    val snapElementsSensitivity: Int = 5,
     val showRulers: Boolean = true,
     val showCenterGuides: Boolean = true,
     val checkerboardBackground: Boolean = false,
@@ -49,6 +52,9 @@ class SettingsRepository(private val context: Context) {
         val gridEnabled = booleanPreferencesKey("grid_enabled")
         val gridSize = intPreferencesKey("grid_size")
         val snapToGrid = booleanPreferencesKey("snap_to_grid")
+        val snapEnabled = booleanPreferencesKey("snap_enabled")
+        val snapCanvasSensitivity = intPreferencesKey("snap_canvas_sensitivity")
+        val snapElementsSensitivity = intPreferencesKey("snap_elements_sensitivity")
         val showRulers = booleanPreferencesKey("show_rulers")
         val showCenterGuides = booleanPreferencesKey("show_center_guides")
         val checkerboard = booleanPreferencesKey("checkerboard_bg")
@@ -74,6 +80,9 @@ class SettingsRepository(private val context: Context) {
             gridEnabled = p[Keys.gridEnabled] ?: true,
             gridSize = p[Keys.gridSize] ?: 50,
             snapToGrid = p[Keys.snapToGrid] ?: false,
+            snapEnabled = p[Keys.snapEnabled] ?: true,
+            snapCanvasSensitivity = p[Keys.snapCanvasSensitivity] ?: 12,
+            snapElementsSensitivity = p[Keys.snapElementsSensitivity] ?: 5,
             showRulers = p[Keys.showRulers] ?: true,
             showCenterGuides = p[Keys.showCenterGuides] ?: true,
             checkerboardBackground = p[Keys.checkerboard] ?: false,
@@ -103,6 +112,15 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSnapToGrid(v: Boolean) =
         context.dataStore.edit { it[Keys.snapToGrid] = v }
+
+    suspend fun setSnapEnabled(v: Boolean) =
+        context.dataStore.edit { it[Keys.snapEnabled] = v }
+
+    suspend fun setSnapCanvasSensitivity(v: Int) =
+        context.dataStore.edit { it[Keys.snapCanvasSensitivity] = v }
+
+    suspend fun setSnapElementsSensitivity(v: Int) =
+        context.dataStore.edit { it[Keys.snapElementsSensitivity] = v }
 
     suspend fun setShowRulers(v: Boolean) =
         context.dataStore.edit { it[Keys.showRulers] = v }

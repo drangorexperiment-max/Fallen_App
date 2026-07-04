@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DriveFileRenameOutline
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Settings
@@ -85,6 +86,16 @@ fun HomeScreen(
         ActivityResultContracts.GetContent(),
     ) { uri ->
         uri?.let(viewModel::importProject)
+    }
+
+    // Экспорт проекта в файл: запоминаем id, затем SAF-диалог выбора места
+    var exportProjectId by remember { mutableStateOf<String?>(null) }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri ->
+        val id = exportProjectId
+        exportProjectId = null
+        if (uri != null && id != null) viewModel.exportProject(id, uri)
     }
 
     LaunchedEffect(Unit) {
@@ -204,7 +215,7 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "Создайте новый проект или импортируйте\nсохранённый файл из UI Studio Pro (.uiproj)",
+                        text = "Создайте новый проект или импортируйте\nфайл проекта (.uiproj)",
                         fontSize = 13.sp,
                         color = colors.textSecondary,
                         lineHeight = 19.sp,
@@ -223,6 +234,10 @@ fun HomeScreen(
                             onRename = { viewModel.renameProject(project.id, it) },
                             onDuplicate = { viewModel.duplicateProject(project.id) },
                             onDelete = { viewModel.deleteProject(project.id) },
+                            onExport = {
+                                exportProjectId = project.id
+                                exportLauncher.launch("${project.name}.uiproj")
+                            },
                         )
                     }
                     item { Spacer(Modifier.height(24.dp)) }
@@ -243,6 +258,7 @@ private fun ProjectCard(
     onRename: (String) -> Unit,
     onDuplicate: () -> Unit,
     onDelete: () -> Unit,
+    onExport: () -> Unit,
 ) {
     val colors = FallenTheme.colors
     var menuOpen by remember { mutableStateOf(false) }
@@ -364,6 +380,14 @@ private fun ProjectCard(
                     onClick = {
                         menuOpen = false
                         onDuplicate()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Экспорт в файл") },
+                    leadingIcon = { Icon(Icons.Outlined.FileUpload, contentDescription = null) },
+                    onClick = {
+                        menuOpen = false
+                        onExport()
                     },
                 )
                 DropdownMenuItem(

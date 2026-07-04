@@ -22,6 +22,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setGridEnabled(v: Boolean) = launch { repo.setGridEnabled(v) }
     fun setGridSize(v: Int) = launch { repo.setGridSize(v) }
     fun setSnapToGrid(v: Boolean) = launch { repo.setSnapToGrid(v) }
+    fun setSnapEnabled(v: Boolean) = launch { repo.setSnapEnabled(v) }
+    fun setSnapCanvasSensitivity(v: Int) = launch { repo.setSnapCanvasSensitivity(v) }
+    fun setSnapElementsSensitivity(v: Int) = launch { repo.setSnapElementsSensitivity(v) }
     fun setShowRulers(v: Boolean) = launch { repo.setShowRulers(v) }
     fun setShowCenterGuides(v: Boolean) = launch { repo.setShowCenterGuides(v) }
     fun setCheckerboardBackground(v: Boolean) = launch { repo.setCheckerboardBackground(v) }

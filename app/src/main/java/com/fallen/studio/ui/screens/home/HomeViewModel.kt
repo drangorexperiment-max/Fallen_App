@@ -68,8 +68,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Импорт файла проекта (.uiproj из старой HTML-программы,
-     * .fallen или .json). Проект сохраняется и сразу открывается.
+     * Экспорт проекта в файл (.uiproj), чтобы передать другому
+     * человеку — он сможет импортировать его у себя.
+     */
+    fun exportProject(id: String, uri: Uri) {
+        viewModelScope.launch {
+            val project = repository.load(id)
+            if (project == null) {
+                _state.value = _state.value.copy(toast = "Проект не найден")
+                return@launch
+            }
+            val ok = repository.exportToUri(project, uri)
+            _state.value = _state.value.copy(
+                toast = if (ok) "Проект «${project.name}» экспортирован" else "Ошибка экспорта",
+            )
+        }
+    }
+
+    /**
+     * Импорт файла проекта (.uiproj, .fallen или .json).
+     * Проект сохраняется и сразу открывается.
      */
     fun importProject(uri: Uri) {
         viewModelScope.launch {

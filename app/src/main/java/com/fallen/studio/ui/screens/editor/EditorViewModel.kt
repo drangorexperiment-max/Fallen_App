@@ -420,28 +420,117 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
+    // Сырая (не «примагниченная») позиция элемента во время жеста.
+    // Snap применяется к ней, а не к уже квантованной позиции —
+    // иначе элемент дрейфует и «прилипает» к границам сам по себе.
+    private var gestureRawX = 0f
+    private var gestureRawY = 0f
+    private var gestureElementId: String? = null
+
     /** Для непрерывных жестов: undo пишется один раз в начале жеста */
     fun beginGesture() {
         pushUndo()
+        val el = _state.value.selectedElement
+        gestureElementId = el?.id
+        gestureRawX = el?.x ?: 0f
+        gestureRawY = el?.y ?: 0f
     }
 
     fun moveElement(id: String, dx: Float, dy: Float) {
-        val snap = settings.value.snapToGrid
-        val grid = settings.value.gridSize.coerceAtLeast(2)
-        _state.value = _state.value.copy(
-            elements = _state.value.elements.map { el ->
-                if (el.id == id && !el.locked) {
-                    var nx = el.x + dx
-                    var ny = el.y + dy
-                    if (snap) {
-                        nx = (nx / grid).toInt() * grid.toFloat()
-                        ny = (ny / grid).toInt() * grid.toFloat()
-                    }
-                    el.copy(x = nx, y = ny)
-                } else el
+        val s = _state.value
+        val el = s.elements.find { it.id == id } ?: return
+        if (el.locked) return
+
+        // Если жест начался с другого элемента — переинициализируем raw-позицию
+        if (gestureElementId != id) {
+            gestureElementId = id
+            gestureRawX = el.x
+            gestureRawY = el.y
+        }
+        gestureRawX += dx
+        gestureRawY += dy
+
+        var nx = gestureRawX
+        var ny = gestureRawY
+        val cfg = settings.value
+
+        // Магнитная привязка (как в оригинале): к центру/краям холста
+        // и к границам других элементов. Работает от сырой позиции,
+        // поэтому элемент легко «отлипает» при дальнейшем движении.
+        if (cfg.snapEnabled) {
+            val snapped = applySnap(nx, ny, el.w, el.h, id, s)
+            nx = snapped.first
+            ny = snapped.second
+        }
+
+        // Привязка к сетке: округление к ближайшему узлу (не усечение)
+        if (cfg.snapToGrid) {
+            val grid = cfg.gridSize.coerceAtLeast(2)
+            nx = Math.round(nx / grid) * grid.toFloat()
+            ny = Math.round(ny / grid) * grid.toFloat()
+        }
+
+        _state.value = s.copy(
+            elements = s.elements.map {
+                if (it.id == id) it.copy(x = nx, y = ny) else it
             },
             isDirty = true,
         )
+    }
+
+    /**
+     * Магнитная привязка из оригинальной программы:
+     * центр и края холста (чувствительность snapCanvasSensitivity),
+     * границы и центры других элементов (snapElementsSensitivity).
+     */
+    private fun applySnap(
+        rawX: Float,
+        rawY: Float,
+        w: Float,
+        h: Float,
+        currentId: String,
+        s: EditorState,
+    ): Pair<Float, Float> {
+        val cfg = settings.value
+        val tC = cfg.snapCanvasSensitivity.toFloat()
+        val tE = cfg.snapElementsSensitivity.toFloat()
+        var x = rawX
+        var y = rawY
+
+        val cx = x + w / 2f
+        val cy = y + h / 2f
+        val ccx = s.canvas.w / 2f
+        val ccy = s.canvas.h / 2f
+
+        // Центр холста
+        if (kotlin.math.abs(cx - ccx) < tC) x = ccx - w / 2f
+        if (kotlin.math.abs(cy - ccy) < tC) y = ccy - h / 2f
+        // Края холста
+        if (kotlin.math.abs(x) < tC) x = 0f
+        if (kotlin.math.abs(x + w - s.canvas.w) < tC) x = s.canvas.w - w
+        if (kotlin.math.abs(y) < tC) y = 0f
+        if (kotlin.math.abs(y + h - s.canvas.h) < tC) y = s.canvas.h - h
+
+        // Границы и центры других элементов
+        for (o in s.elements) {
+            if (o.id == currentId) continue
+            val ocx = o.x + o.w / 2f
+            val ocy = o.y + o.h / 2f
+            val ncx = x + w / 2f
+            val ncy = y + h / 2f
+            if (kotlin.math.abs(ncx - ocx) < tE) x = ocx - w / 2f
+            if (kotlin.math.abs(ncy - ocy) < tE) y = ocy - h / 2f
+            if (kotlin.math.abs(x - o.x) < tE) x = o.x
+            if (kotlin.math.abs(x + w - (o.x + o.w)) < tE) x = o.x + o.w - w
+            if (kotlin.math.abs(x - (o.x + o.w)) < tE) x = o.x + o.w
+            if (kotlin.math.abs(x + w - o.x) < tE) x = o.x - w
+            if (kotlin.math.abs(y - o.y) < tE) y = o.y
+            if (kotlin.math.abs(y + h - (o.y + o.h)) < tE) y = o.y + o.h - h
+            if (kotlin.math.abs(y - (o.y + o.h)) < tE) y = o.y + o.h
+            if (kotlin.math.abs(y + h - o.y) < tE) y = o.y - h
+        }
+
+        return x to y
     }
 
     fun resizeElement(id: String, newX: Float, newY: Float, newW: Float, newH: Float) {
