@@ -275,7 +275,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
     item {
         SwitchRow(
             label = "Показывать сетку",
-            sublabel = "Ровная квадратная сетка на холсте",
+            description = "Ровная квадратная сетка на холсте",
             checked = settings.gridEnabled,
             onCheckedChange = vm::setGridEnabled,
         )
@@ -284,7 +284,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
         SliderRow(
             label = "Размер ячейки сетки",
             value = settings.gridSize.toFloat(),
-            range = 10f..200f,
+            valueRange = 10f..200f,
             valueLabel = { "${it.toInt()} px" },
             onValueChange = { vm.setGridSize(it.toInt()) },
         )
@@ -292,7 +292,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
     item {
         SwitchRow(
             label = "Привязка к сетке",
-            sublabel = "Элементы прилипают к линиям сетки при перемещении",
+            description = "Элементы прилипают к линиям сетки при перемещении",
             checked = settings.snapToGrid,
             onCheckedChange = vm::setSnapToGrid,
         )
@@ -301,7 +301,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
     item {
         SwitchRow(
             label = "Линейки",
-            sublabel = "Шкала координат по краям холста",
+            description = "Шкала координат по краям холста",
             checked = settings.showRulers,
             onCheckedChange = vm::setShowRulers,
         )
@@ -309,7 +309,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
     item {
         SwitchRow(
             label = "Центральные направляющие",
-            sublabel = "Пунктирные линии по центру холста",
+            description = "Пунктирные линии по центру холста",
             checked = settings.showCenterGuides,
             onCheckedChange = vm::setShowCenterGuides,
         )
@@ -318,7 +318,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
     item {
         SwitchRow(
             label = "Шахматный фон",
-            sublabel = "Показывает прозрачность как в графических редакторах",
+            description = "Показывает прозрачность как в графических редакторах",
             checked = settings.checkerboardBackground,
             onCheckedChange = vm::setCheckerboardBackground,
         )
@@ -326,7 +326,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
     item {
         SwitchRow(
             label = "Затемнять область вне холста",
-            sublabel = "Холст сильнее выделяется на фоне",
+            description = "Холст сильнее выделяется на фоне",
             checked = settings.canvasDimOutside,
             onCheckedChange = vm::setCanvasDimOutside,
         )
@@ -345,7 +345,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorTab(
     item {
         SwitchRow(
             label = "Автосохранение",
-            sublabel = "Автоматически сохранять черновик проекта",
+            description = "Автоматически сохранять черновик проекта",
             checked = settings.autosaveEnabled,
             onCheckedChange = vm::setAutosaveEnabled,
         )
@@ -354,7 +354,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorTab(
         SliderRow(
             label = "Интервал автосохранения",
             value = settings.autosaveIntervalSec.toFloat(),
-            range = 10f..300f,
+            valueRange = 10f..300f,
             valueLabel = { "${it.toInt()} сек" },
             onValueChange = { vm.setAutosaveInterval(it.toInt()) },
         )
@@ -364,7 +364,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorTab(
         SliderRow(
             label = "Глубина отката (undo)",
             value = settings.undoLimit.toFloat(),
-            range = 5f..200f,
+            valueRange = 5f..200f,
             valueLabel = { "${it.toInt()} шагов" },
             onValueChange = { vm.setUndoLimit(it.toInt()) },
         )
@@ -381,7 +381,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorTab(
     item {
         SwitchRow(
             label = "Виброотклик",
-            sublabel = "Вибрация при выделении и привязке",
+            description = "Вибрация при выделении и привязке",
             checked = settings.hapticFeedback,
             onCheckedChange = vm::setHapticFeedback,
         )
@@ -389,7 +389,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorTab(
     item {
         SwitchRow(
             label = "Подсказка размеров",
-            sublabel = "Показывать размер элемента при изменении",
+            description = "Показывать размер элемента при изменении",
             checked = settings.showSizeTooltip,
             onCheckedChange = vm::setShowSizeTooltip,
         )
@@ -397,7 +397,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorTab(
     item {
         SwitchRow(
             label = "Сохранять пропорции",
-            sublabel = "По умолчанию при изменении размера",
+            description = "По умолчанию при изменении размера",
             checked = settings.keepAspectDefault,
             onCheckedChange = vm::setKeepAspectDefault,
         )
@@ -499,7 +499,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exportTab(
     item {
         SwitchRow(
             label = "Комментарии в коде",
-            sublabel = "Добавлять пояснения в экспортируемый код",
+            description = "Добавлять пояснения в экспортируемый код",
             checked = settings.includeComments,
             onCheckedChange = vm::setIncludeComments,
         )
