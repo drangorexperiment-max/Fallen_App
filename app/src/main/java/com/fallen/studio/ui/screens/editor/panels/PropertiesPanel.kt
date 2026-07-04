@@ -17,10 +17,16 @@ import androidx.compose.material.icons.automirrored.outlined.FormatAlignLeft
 import androidx.compose.material.icons.automirrored.outlined.FormatAlignRight
 import androidx.compose.material.icons.outlined.FormatAlignCenter
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.FontDownload
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -36,22 +42,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.fallen.studio.data.model.CanvasElement
+import com.fallen.studio.data.model.ProjectFont
 import com.fallen.studio.ui.components.FallenColorPicker
 import com.fallen.studio.ui.components.NumberField
 import com.fallen.studio.ui.components.PanelSectionTitle
 import com.fallen.studio.ui.components.SliderRow
 import com.fallen.studio.ui.components.SwitchRow
+import com.fallen.studio.util.FontManager
 
 /**
  * Панель «Свойства»: редактирование выбранного элемента.
  * Для текста — полный набор: шрифт, обводка и тень
  * (тень корректно применяется и к обводке — см. TextElementRenderer).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PropertiesPanel(
     element: CanvasElement?,
     onUpdate: ((CanvasElement) -> CanvasElement) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fonts: List<ProjectFont> = emptyList(),
 ) {
     if (element == null) {
         Column(
@@ -170,6 +180,13 @@ fun PropertiesPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
+            )
+
+            // Выбор шрифта: встроенные + загруженные в проект
+            FontFamilySelector(
+                current = element.fontFamily ?: "Inter",
+                fonts = fonts,
+                onSelect = { name -> onUpdate { it.copy(fontFamily = name) } },
             )
 
             SliderRow(
@@ -301,6 +318,71 @@ fun PropertiesPanel(
                     color = element.shadowColor ?: "#000000",
                     onColorSelected = { c -> onUpdate { it.copy(shadowColor = c) } }
                 )
+            }
+        }
+    }
+}
+
+/** Выпадающий список шрифтов: встроенные + пользовательские из проекта */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun FontFamilySelector(
+    current: String,
+    fonts: List<ProjectFont>,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        OutlinedTextField(
+            value = current,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Шрифт") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            FontManager.builtinFontNames.forEach { name ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        onSelect(name)
+                        expanded = false
+                    }
+                )
+            }
+            if (fonts.isNotEmpty()) {
+                HorizontalDivider()
+                fonts.forEach { font ->
+                    DropdownMenuItem(
+                        text = { Text(font.name) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Outlined.FontDownload,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        onClick = {
+                            onSelect(font.name)
+                            expanded = false
+                        }
+                    )
+                }
             }
         }
     }

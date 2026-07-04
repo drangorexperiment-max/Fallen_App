@@ -1,5 +1,7 @@
 package com.fallen.studio.ui.screens.editor
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -85,6 +87,13 @@ fun EditorScreen(
     val settings by viewModel.settings.collectAsState()
     val colors = FallenTheme.colors
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Лаунчер выбора файла шрифта (.ttf / .otf)
+    val fontPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.addFontFromUri(it) }
+    }
     var viewScale by remember { mutableFloatStateOf(0.15f) }
     var showClearDialog by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
@@ -190,7 +199,14 @@ fun EditorScreen(
                     onDeleteAsset = viewModel::deleteAsset,
                 )
                 EditorPanel.TEXT -> TextPanel(
+                    fonts = state.fonts,
                     onAddText = viewModel::addTextElement,
+                    onImportFont = {
+                        fontPickerLauncher.launch(
+                            arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream"),
+                        )
+                    },
+                    onDeleteFont = viewModel::deleteFont,
                 )
                 EditorPanel.LAYERS -> LayersPanel(
                     elements = state.elements,
@@ -206,6 +222,7 @@ fun EditorScreen(
                     onUpdate = { transform ->
                         state.selectedId?.let { viewModel.updateElement(it, transform) }
                     },
+                    fonts = state.fonts,
                 )
                 EditorPanel.EXPORT -> ExportPanel(
                     project = viewModel.currentProject(),

@@ -21,7 +21,12 @@ object ImageExporter {
      * @param scale множитель разрешения (0.25..4)
      * @param transparentBackground true — прозрачный фон, false — тёмный
      */
-    fun render(project: FallenProject, scale: Float = 1f, transparentBackground: Boolean = true): Bitmap? {
+    fun render(
+        project: FallenProject,
+        scale: Float = 1f,
+        transparentBackground: Boolean = true,
+        context: Context? = null,
+    ): Bitmap? {
         val w = (project.canvas.w * scale).toInt().coerceIn(1, 8192)
         val h = (project.canvas.h * scale).toInt().coerceIn(1, 8192)
 
@@ -61,7 +66,7 @@ object ImageExporter {
                         (alpha * 255).toInt(),
                     )
                 }
-                TextElementRenderer.draw(canvas, el)
+                TextElementRenderer.draw(canvas, el, project.fonts, context)
                 if (alpha < 1f) canvas.restore()
             }
             canvas.restore()
@@ -82,7 +87,7 @@ object ImageExporter {
         scale: Float,
         transparentBackground: Boolean,
     ): Boolean {
-        val bitmap = render(project, scale, transparentBackground) ?: return false
+        val bitmap = render(project, scale, transparentBackground, context) ?: return false
         return try {
             context.contentResolver.openOutputStream(uri)?.use { out ->
                 writePng(bitmap, out)
