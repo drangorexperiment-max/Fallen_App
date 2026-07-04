@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -30,6 +31,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import com.fallen.studio.data.AppSettings
@@ -70,6 +72,18 @@ fun EditorCanvas(
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var initialized by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+
+    // ИСПРАВЛЕНИЕ ЗУМА: pointerInput(Unit) не пересоздаётся при изменении
+    // viewScale/viewOffset/elements, поэтому жест не обрывается на каждом
+    // кадре. Актуальное состояние читается через rememberUpdatedState.
+    val currentState by rememberUpdatedState(state)
+    val currentOnSelect by rememberUpdatedState(onSelect)
+    val currentOnBeginGesture by rememberUpdatedState(onBeginGesture)
+    val currentOnMove by rememberUpdatedState(onMove)
+    val currentOnResize by rememberUpdatedState(onResize)
+    val currentOnViewTransform by rememberUpdatedState(onViewTransform)
+
     // Кэш декодированных Bitmap по src (LRU-подобный, простой)
     val bitmapCache = remember { mutableMapOf<String, Bitmap?>() }
 
@@ -82,14 +96,14 @@ fun EditorCanvas(
     fun fitToScreen() {
         if (containerSize.width == 0 || containerSize.height == 0) return
         val padding = 48f
-        val scaleX = (containerSize.width - padding * 2) / state.canvas.w
-        val scaleY = (containerSize.height - padding * 2) / state.canvas.h
+        val scaleX = (containerSize.width - padding * 2) / currentState.canvas.w
+        val scaleY = (containerSize.height - padding * 2) / currentState.canvas.h
         viewScale = minOf(scaleX, scaleY).coerceIn(0.02f, 4f)
         viewOffset = Offset(
-            (containerSize.width - state.canvas.w * viewScale) / 2f,
-            (containerSize.height - state.canvas.h * viewScale) / 2f,
+            (containerSize.width - currentState.canvas.w * viewScale) / 2f,
+            (containerSize.height - currentState.canvas.h * viewScale) / 2f,
         )
-        onViewTransform(viewScale)
+        currentOnViewTransform(viewScale)
     }
 
     fun screenToCanvas(p: Offset): Offset =
@@ -97,7 +111,7 @@ fun EditorCanvas(
 
     /** Хит-тест элементов сверху вниз (по z) */
     fun hitTest(canvasPoint: Offset): CanvasElement? =
-        state.elements
+        currentState.elements
             .sortedByDescending { it.z }
             .firstOrNull { el ->
                 canvasPoint.x >= el.x && canvasPoint.x <= el.x + el.w &&
@@ -106,7 +120,7 @@ fun EditorCanvas(
 
     /** Хит-тест ручек ресайза выделенного элемента */
     fun hitTestHandle(canvasPoint: Offset): Handle? {
-        val el = state.selectedElement ?: return null
+        val el = currentState.selectedElement ?: return null
         val r = 24f / viewScale // радиус захвата ручки в координатах канваса
         val handles = mapOf(
             Handle.NW to Offset(el.x, el.y),
@@ -131,7 +145,7 @@ fun EditorCanvas(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(state.selectedId, state.elements, viewScale, viewOffset) {
+                .pointerInput(Unit) {
                     awaitEachGesture {
                         val firstDown = awaitFirstDown()
                         var mode = GestureMode.NONE
@@ -142,19 +156,13 @@ fun EditorCanvas(
                         val handleHit = hitTestHandle(startCanvasPoint)
                         val elementHit = hitTest(startCanvasPoint)
 
-                        // Стартовые данные для ресайза
-                        val sel = state.selectedElement
-                        val startRect = sel?.let { Rect(it.x, it.y, it.x + it.w, it.y + it.h) }
-
                         while (true) {
                             val event = awaitPointerEvent()
-                            if (event.type == PointerEventType.Release &&
-                                event.changes.all { !it.pressed }
-                            ) {
+                            if (event.changes.all { !it.pressed }) {
                                 // Отпустили все пальцы
                                 if (mode == GestureMode.NONE) {
                                     // Это был тап — выделение
-                                    onSelect(elementHit?.id)
+                                    currentOnSelect(elementHit?.id)
                                 }
                                 break
                             }
@@ -162,22 +170,32 @@ fun EditorCanvas(
                             val pointerCount = event.changes.count { it.pressed }
 
                             if (pointerCount >= 2) {
-                                // Два пальца — пан и зум вида
+                                // Два пальца — пан и зум вида.
+                                // Как только начали пан/зум, перетаскивание
+                                // элемента больше не активируется до конца жеста.
                                 mode = GestureMode.PAN_ZOOM
                                 val zoom = event.calculateZoom()
                                 val pan = event.calculatePan()
                                 val centroid = event.calculateCentroid()
                                 if (zoom != 1f || pan != Offset.Zero) {
-                                    val newScale = (viewScale * zoom).coerceIn(0.02f, 6f)
+                                    val oldScale = viewScale
+                                    val newScale = (oldScale * zoom).coerceIn(0.02f, 6f)
                                     // Масштабирование относительно центра жеста
                                     viewOffset = Offset(
-                                        centroid.x - (centroid.x - viewOffset.x) * (newScale / viewScale) + pan.x,
-                                        centroid.y - (centroid.y - viewOffset.y) * (newScale / viewScale) + pan.y,
+                                        centroid.x - (centroid.x - viewOffset.x) * (newScale / oldScale) + pan.x,
+                                        centroid.y - (centroid.y - viewOffset.y) * (newScale / oldScale) + pan.y,
                                     )
                                     viewScale = newScale
-                                    onViewTransform(viewScale)
+                                    currentOnViewTransform(newScale)
                                 }
-                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                event.changes.forEach { it.consume() }
+                                continue
+                            }
+
+                            // Если жест уже был двухпальцевым — остался один палец,
+                            // просто ждём завершения, ничего не двигаем.
+                            if (mode == GestureMode.PAN_ZOOM && pointerCount == 1) {
+                                event.changes.forEach { it.consume() }
                                 continue
                             }
 
@@ -192,11 +210,11 @@ fun EditorCanvas(
                                     (mode == GestureMode.NONE && handleHit != null) -> {
                                     mode = GestureMode.RESIZE
                                     activeHandle = activeHandle ?: handleHit
-                                    val el = state.selectedElement
-                                    if (el != null && startRect != null && !el.locked) {
+                                    val el = currentState.selectedElement
+                                    if (el != null && !el.locked) {
                                         if (!gestureStarted) {
                                             gestureStarted = true
-                                            onBeginGesture()
+                                            currentOnBeginGesture()
                                         }
                                         val current = screenToCanvas(change.position)
                                         var left = el.x
@@ -215,7 +233,7 @@ fun EditorCanvas(
                                             null -> {}
                                         }
                                         if (right - left >= 10f && bottom - top >= 10f) {
-                                            onResize(el.id, left, top, right - left, bottom - top)
+                                            currentOnResize(el.id, left, top, right - left, bottom - top)
                                         }
                                     }
                                     change.consume()
@@ -223,19 +241,19 @@ fun EditorCanvas(
 
                                 mode == GestureMode.DRAG ||
                                     (mode == GestureMode.NONE && elementHit != null &&
-                                        elementHit.id == state.selectedId && !elementHit.locked) -> {
+                                        elementHit.id == currentState.selectedId && !elementHit.locked) -> {
                                     mode = GestureMode.DRAG
                                     if (!gestureStarted) {
                                         gestureStarted = true
-                                        onBeginGesture()
+                                        currentOnBeginGesture()
                                     }
-                                    onMove(elementHit!!.id, canvasDelta.x, canvasDelta.y)
+                                    currentOnMove(elementHit!!.id, canvasDelta.x, canvasDelta.y)
                                     change.consume()
                                 }
 
                                 else -> {
                                     // Один палец по пустому месту — пан вида
-                                    mode = GestureMode.PAN_ZOOM
+                                    mode = GestureMode.PAN
                                     viewOffset += delta
                                     change.consume()
                                 }

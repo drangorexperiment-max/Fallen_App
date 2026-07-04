@@ -1,5 +1,6 @@
 package com.fallen.studio.ui.screens.editor
 
+import android.content.Context
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
@@ -9,7 +10,9 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import com.fallen.studio.data.model.CanvasElement
+import com.fallen.studio.data.model.ProjectFont
 import com.fallen.studio.util.ColorUtils
+import com.fallen.studio.util.FontManager
 
 /**
  * Рендер текстового элемента на нативном Canvas.
@@ -28,7 +31,12 @@ import com.fallen.studio.util.ColorUtils
  */
 object TextElementRenderer {
 
-    fun draw(canvas: Canvas, el: CanvasElement) {
+    fun draw(
+        canvas: Canvas,
+        el: CanvasElement,
+        fonts: List<ProjectFont> = emptyList(),
+        context: Context? = null,
+    ) {
         val text = el.text ?: return
         if (text.isEmpty()) return
 
@@ -37,10 +45,7 @@ object TextElementRenderer {
             "bold", "700", "800", "900" -> true
             else -> false
         }
-        val typeface = Typeface.create(
-            Typeface.SANS_SERIF,
-            if (isBold) Typeface.BOLD else Typeface.NORMAL,
-        )
+        val typeface: Typeface = FontManager.resolve(context, el.fontFamily, fonts, isBold)
 
         val alignment = when (el.textAlign) {
             "left" -> Layout.Alignment.ALIGN_NORMAL

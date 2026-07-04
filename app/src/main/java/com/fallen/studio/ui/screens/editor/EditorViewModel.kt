@@ -11,6 +11,8 @@ import com.fallen.studio.data.model.Asset
 import com.fallen.studio.data.model.CanvasElement
 import com.fallen.studio.data.model.CanvasSize
 import com.fallen.studio.data.model.FallenProject
+import com.fallen.studio.data.model.ProjectFont
+import com.fallen.studio.util.FontManager
 import com.fallen.studio.util.ImageUtils
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -31,6 +33,7 @@ data class EditorState(
     val canvas: CanvasSize = CanvasSize(),
     val assets: List<Asset> = emptyList(),
     val elements: List<CanvasElement> = emptyList(),
+    val fonts: List<ProjectFont> = emptyList(),
     val counter: Int = 0,
     val selectedId: String? = null,
     val activePanel: EditorPanel = EditorPanel.NONE,
@@ -48,6 +51,7 @@ private data class Snapshot(
     val canvas: CanvasSize,
     val assets: List<Asset>,
     val elements: List<CanvasElement>,
+    val fonts: List<ProjectFont>,
     val counter: Int,
 )
 
@@ -101,6 +105,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             canvas = project.canvas,
             assets = project.assets,
             elements = project.elements.sortedBy { it.z },
+            fonts = project.fonts,
             counter = project.counter,
         )
     }
@@ -113,6 +118,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             canvas = s.canvas,
             assets = s.assets,
             elements = s.elements,
+            fonts = s.fonts,
             counter = s.counter,
         )
     }
@@ -150,7 +156,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun pushUndo() {
         val s = _state.value
-        undoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.counter))
+        undoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.fonts, s.counter))
         val limit = settings.value.undoLimit.coerceAtLeast(5)
         while (undoStack.size > limit) undoStack.removeFirst()
         redoStack.clear()
@@ -160,7 +166,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun undo() {
         val snapshot = undoStack.removeLastOrNull() ?: return
         val s = _state.value
-        redoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.counter))
+        redoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.fonts, s.counter))
         restore(snapshot)
         showToast("Отменено")
     }
@@ -168,7 +174,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun redo() {
         val snapshot = redoStack.removeLastOrNull() ?: return
         val s = _state.value
-        undoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.counter))
+        undoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.fonts, s.counter))
         restore(snapshot)
         showToast("Возвращено")
     }
@@ -179,6 +185,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             canvas = snapshot.canvas,
             assets = snapshot.assets,
             elements = snapshot.elements,
+            fonts = snapshot.fonts,
             counter = snapshot.counter,
             selectedId = if (snapshot.elements.any { it.id == selected }) selected else null,
             isDirty = true,
@@ -306,6 +313,48 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         showToast("«${asset.name}» добавлен")
     }
 
+    // ---------- Шрифты ----------
+
+    /** Загружает пользовательский шрифт (.ttf / .otf) в проект */
+    fun addFontFromUri(uri: Uri) {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            val font = FontManager.fontFromUri(context, uri)
+            if (font == null) {
+                showToast("Не удалось загрузить шрифт (нужен .ttf или .otf до 8 МБ)")
+                return@launch
+            }
+            if (_state.value.fonts.any { it.name == font.name }) {
+                showToast("Шрифт «${font.name}» уже добавлен")
+                return@launch
+            }
+            pushUndo()
+            _state.value = _state.value.copy(
+                fonts = _state.value.fonts + font,
+                isDirty = true,
+            )
+            showToast("Шрифт «${font.name}» добавлен")
+        }
+    }
+
+    /** Удаляет шрифт из проекта; элементы возвращаются на шрифт по умолчанию */
+    fun deleteFont(id: String) {
+        pushUndo()
+        val s = _state.value
+        val font = s.fonts.find { it.id == id } ?: return
+        FontManager.invalidate(id)
+        _state.value = s.copy(
+            fonts = s.fonts.filter { it.id != id },
+            elements = s.elements.map {
+                if (it.fontFamily == font.name || it.fontFamily == font.id) {
+                    it.copy(fontFamily = "Inter")
+                } else it
+            },
+            isDirty = true,
+        )
+        showToast("Шрифт удалён")
+    }
+
     // ---------- Текст ----------
 
     fun addTextElement(
@@ -314,6 +363,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         fontWeight: String,
         color: String,
         textAlign: String,
+        fontFamily: String = "Inter",
     ) {
         if (text.isBlank()) {
             showToast("Введите текст")
@@ -327,7 +377,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             type = "text",
             name = "Text_$counter",
             text = text,
-            fontFamily = "Inter",
+            fontFamily = fontFamily,
             fontSize = fontSize,
             fontWeight = fontWeight,
             color = color,
