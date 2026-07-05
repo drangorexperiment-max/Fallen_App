@@ -18,6 +18,8 @@
         android:maxSdkVersion="28" />
     <!-- Интернет — открытие ссылок Telegram / VK -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Вибрация — тактильный отклик в редакторе -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"

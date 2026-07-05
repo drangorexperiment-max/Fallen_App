@@ -735,7 +735,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutSection(
     }
 }
 
-/** Круглая кнопка соцсети: белый круг с векторной иконкой, без текста */
+/** Круглая кнопка соцсети: белый круг с PNG-иконкой, без текста */
 @Composable
 private fun SocialCircleButton(
     iconRes: Int,
@@ -752,13 +752,13 @@ private fun SocialCircleButton(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        // Векторные иконки белые в исходнике — тонируем тёмным,
-        // чтобы были видны на белом круге
-        Icon(
+        // Квадратные PNG (чёрный знак на белом фоне) — заполняют круг
+        // целиком, поэтому знак стоит ровно по центру, а белый фон
+        // изображения совпадает с белым фоном круга
+        Image(
             painter = painterResource(id = iconRes),
             contentDescription = contentDescription,
-            tint = Color(0xFF1A1A22),
-            modifier = Modifier.size(28.dp),
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }

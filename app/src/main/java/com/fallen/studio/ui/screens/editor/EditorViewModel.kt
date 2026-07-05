@@ -13,6 +13,7 @@ import com.fallen.studio.data.model.CanvasSize
 import com.fallen.studio.data.model.FallenProject
 import com.fallen.studio.data.model.ProjectFont
 import com.fallen.studio.util.FontManager
+import com.fallen.studio.util.Haptics
 import com.fallen.studio.util.ImageUtils
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -191,6 +192,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val s = _state.value
         redoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.fonts, s.counter))
         restore(snapshot)
+        haptic(strong = true)
         showToast("Отменено")
     }
 
@@ -199,6 +201,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val s = _state.value
         undoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.fonts, s.counter))
         restore(snapshot)
+        haptic(strong = true)
         showToast("Возвращено")
     }
 
@@ -233,7 +236,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     // ---------- Выделение и панели ----------
 
+    /** Тактильный отклик с учётом настройки «Вибрация» */
+    private fun haptic(strong: Boolean = false) {
+        if (!settings.value.hapticFeedback) return
+        if (strong) Haptics.click(getApplication()) else Haptics.tick(getApplication())
+    }
+
     fun select(id: String?) {
+        // Вибрация только при выборе элемента (не при снятии выделения)
+        if (id != null && id != _state.value.selectedId) haptic()
         _state.value = _state.value.copy(selectedId = id)
     }
 
@@ -450,6 +461,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             activePanel = EditorPanel.NONE,
             isDirty = true,
         )
+        haptic(strong = true)
         showToast("Текст добавлен")
     }
 
@@ -711,6 +723,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             selectedId = if (s.selectedId == id) null else s.selectedId,
             isDirty = true,
         )
+        haptic(strong = true)
         showToast("Элемент удалён")
     }
 
@@ -733,6 +746,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             selectedId = copy.id,
             isDirty = true,
         )
+        haptic(strong = true)
         showToast("Элемент дублирован")
     }
 

@@ -26,13 +26,16 @@ import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,7 +56,6 @@ import com.fallen.studio.export.ExportEngine
 import com.fallen.studio.export.ExportFormat
 import com.fallen.studio.export.ImageExporter
 import com.fallen.studio.ui.components.PanelSectionTitle
-import com.fallen.studio.ui.components.SliderRow
 import com.fallen.studio.ui.components.SwitchRow
 
 /**
@@ -270,13 +272,104 @@ fun ExportPanel(
         // ---------- PNG ----------
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
         PanelSectionTitle("Экспорт изображения (PNG)")
-        SliderRow(
-            label = "Масштаб",
-            value = imageScale,
-            onValueChange = { imageScale = it },
-            valueRange = 0.25f..2f,
-            valueLabel = { String.format(java.util.Locale.US, "%.2fx", it) }
-        )
+
+        // Выбор разрешения: список готовых вариантов на основе холста
+        // + возможность вписать своё. Масштаб вычисляется автоматически.
+        val canvasW = project.canvas.w.toInt()
+        val canvasH = project.canvas.h.toInt()
+        val presets = remember(canvasW, canvasH) {
+            listOf(0.5f, 1f, 1.5f, 2f).map { s ->
+                Triple((canvasW * s).toInt(), (canvasH * s).toInt(), s)
+            }.filter { it.first in 1..8192 && it.second in 1..8192 }
+        }
+        var customMode by remember { mutableStateOf(false) }
+        var customW by remember { mutableStateOf(canvasW.toString()) }
+
+        presets.forEach { (w, h, s) ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        customMode = false
+                        imageScale = s
+                    }
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RadioButton(
+                    selected = !customMode && imageScale == s,
+                    onClick = {
+                        customMode = false
+                        imageScale = s
+                    },
+                )
+                Text(
+                    text = "$w × $h" + if (s == 1f) " (оригинал)" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+        // Своё разрешение: ширина вводится цифрами, высота считается
+        // по пропорциям холста
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { customMode = true }
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            RadioButton(selected = customMode, onClick = { customMode = true })
+            Text(
+                text = "Своё разрешение",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        if (customMode) {
+            val customWInt = customW.toIntOrNull()
+            val customScale = if (customWInt != null && customWInt in 1..8192) {
+                customWInt.toFloat() / canvasW
+            } else null
+            val customHInt = customScale?.let { (canvasH * it).toInt() }
+            // Применяем введённое значение к масштабу экспорта
+            if (customScale != null) imageScale = customScale
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = customW,
+                    onValueChange = { input ->
+                        customW = input.filter { ch -> ch.isDigit() }.take(4)
+                    },
+                    label = { Text("Ширина, px") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (customHInt != null) "× $customHInt px" else "—",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (customScale == null) {
+                Text(
+                    text = "Введите ширину от 1 до 8192",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+        }
+
         SwitchRow(
             label = "Прозрачный фон",
             checked = transparentBg,
