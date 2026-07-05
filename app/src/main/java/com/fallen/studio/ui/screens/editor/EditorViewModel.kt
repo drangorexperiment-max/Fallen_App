@@ -360,7 +360,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** Удаляет шрифт из проекта; элементы возвращаются на шрифт по умолчанию */
+    /** Удаляет шрифт из проекта; элементы возвращаются на шрифт по умолчани�� */
     fun deleteFont(id: String) {
         pushUndo()
         val s = _state.value
@@ -421,10 +421,12 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             h = 60f,
             z = s.elements.size,
         )
+        // Рамка нового текста сразу подгоняется под фактический размер текста
+        val fitted = fitTextBox(element)
         _state.value = s.copy(
-            elements = s.elements + element,
+            elements = s.elements + fitted,
             counter = counter,
-            selectedId = element.id,
+            selectedId = fitted.id,
             activePanel = EditorPanel.NONE,
             isDirty = true,
         )
@@ -433,17 +435,30 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     // ---------- Операции над элементами ----------
 
+    /**
+     * ИСПРАВЛЕНИЕ «текст выходит за рамку»: высота рамки текстового
+     * элемента всегда подгоняется под фактическую высоту текста
+     * (измеряется тем же StaticLayout, которым текст рисуется).
+     * Рамка растёт вниз, если текст переносится на новые строки.
+     */
+    private fun fitTextBox(el: CanvasElement): CanvasElement {
+        if (!el.isText) return el
+        val fonts = _state.value.fonts
+        val measured = TextElementRenderer.measureHeight(el, fonts, getApplication())
+        return if (measured > el.h) el.copy(h = measured) else el
+    }
+
     fun updateElement(id: String, transform: (CanvasElement) -> CanvasElement, recordUndo: Boolean = true) {
         if (recordUndo) pushUndo()
         _state.value = _state.value.copy(
             elements = _state.value.elements.map {
-                if (it.id == id) transform(it) else it
+                if (it.id == id) fitTextBox(transform(it)) else it
             },
             isDirty = true,
         )
     }
 
-    // Сырая (не «примагниченная») позиция элемента во время жеста.
+    // Сырая (не «примагниченная») позиция элеме��та во время жеста.
     // Snap применяется к ней, а не к уже квантованной позиции —
     // иначе элемент дрейфует и «прилипает» к границам сам по себе.
     private var gestureRawX = 0f
@@ -583,11 +598,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _state.value = _state.value.copy(
             elements = _state.value.elements.map { el ->
                 if (el.id == id && !el.locked) {
-                    el.copy(
-                        x = x,
-                        y = y,
-                        w = w.coerceAtLeast(10f),
-                        h = h.coerceAtLeast(10f),
+                    fitTextBox(
+                        el.copy(
+                            x = x,
+                            y = y,
+                            w = w.coerceAtLeast(10f),
+                            h = h.coerceAtLeast(10f),
+                        ),
                     )
                 } else el
             },
@@ -626,10 +643,12 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             elements = s.elements.map {
                 if (it.id == id) {
                     if (it.isText) {
-                        it.copy(
-                            w = w,
-                            h = h,
-                            fontSize = (scaleStartFontSize * factor).toInt().coerceIn(4, 2000),
+                        fitTextBox(
+                            it.copy(
+                                w = w,
+                                h = h,
+                                fontSize = (scaleStartFontSize * factor).toInt().coerceIn(4, 2000),
+                            ),
                         )
                     } else {
                         it.copy(w = w, h = h)

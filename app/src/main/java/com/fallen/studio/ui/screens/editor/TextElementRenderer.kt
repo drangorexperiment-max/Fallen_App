@@ -31,6 +31,42 @@ import com.fallen.studio.util.FontManager
  */
 object TextElementRenderer {
 
+    /**
+     * Измеряет фактическую высоту текста при текущей ширине рамки el.w.
+     * Использует те же параметры, что и draw(), поэтому результат
+     * точно совпадает с тем, что рисуется на холсте.
+     * Нужна для авто-подгонки рамки: текст не должен выходить за неё.
+     */
+    fun measureHeight(
+        el: CanvasElement,
+        fonts: List<ProjectFont> = emptyList(),
+        context: Context? = null,
+    ): Float {
+        val text = el.text ?: return el.h
+        if (text.isEmpty()) return el.h
+
+        val fontSize = (el.fontSize ?: 24).toFloat()
+        val isBold = when (el.fontWeight) {
+            "bold", "700", "800", "900" -> true
+            else -> false
+        }
+        val typeface: Typeface = FontManager.resolve(context, el.fontFamily, fonts, isBold)
+        val lineSpacingMult = 0.5f + (el.lineHeight ?: 50f) / 100f
+        val letterSpacingEm = ((el.letterSpacing ?: 50f) - 50f) / 250f
+
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.typeface = typeface
+            textSize = fontSize
+            letterSpacing = letterSpacingEm
+        }
+        val layout = StaticLayout.Builder
+            .obtain(text, 0, text.length, paint, el.w.toInt().coerceAtLeast(1))
+            .setLineSpacing(0f, lineSpacingMult)
+            .setIncludePad(false)
+            .build()
+        return layout.height.toFloat()
+    }
+
     fun draw(
         canvas: Canvas,
         el: CanvasElement,
