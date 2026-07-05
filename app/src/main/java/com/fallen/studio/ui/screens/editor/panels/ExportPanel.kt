@@ -301,14 +301,14 @@ fun ExportPanel(
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
         PanelSectionTitle("Файл проекта")
         Text(
-            text = "Сохраните проект в файл .uiproj, чтобы передать другому человеку — он импортирует его на главном экране.",
+            text = "Сохраните проект в файл .fallen, чтобы хранить его на вашем устройстве, а также отправить другому пользователю.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp)
         )
         FilledTonalButton(
             onClick = {
-                saveProjectLauncher.launch("${project.name.ifBlank { "project" }}.uiproj")
+                saveProjectLauncher.launch("${project.name.ifBlank { "project" }}.fallen")
             },
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier
@@ -318,7 +318,7 @@ fun ExportPanel(
         ) {
             Icon(Icons.Outlined.FolderZip, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Экспорт проекта (.uiproj)")
+            Text("Экспорт проекта (.fallen)")
         }
     }
 }

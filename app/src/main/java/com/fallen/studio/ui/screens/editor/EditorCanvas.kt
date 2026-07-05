@@ -38,8 +38,11 @@ import com.fallen.studio.ui.theme.FallenColors
 import com.fallen.studio.util.ImageUtils
 import kotlin.math.abs
 
-/** Ручки ресайза */
-private enum class Handle { NW, N, NE, W, E, SW, S, SE }
+/** Ручки ресайза. SCALE — пропорциональное масштабирование (правый нижний угол, снаружи) */
+private enum class Handle { NW, N, NE, W, E, SW, S, SE, SCALE }
+
+/** Смещение ручки масштабирования от правого нижнего угла (в px канваса при scale=1) */
+private const val SCALE_HANDLE_OFFSET = 34f
 
 /** Режим текущего жеста */
 private enum class GestureMode { NONE, DRAG, RESIZE, PAN, PAN_ZOOM }
@@ -64,6 +67,8 @@ fun EditorCanvas(
     onResize: (String, Float, Float, Float, Float) -> Unit,
     modifier: Modifier = Modifier,
     onViewTransform: (scale: Float) -> Unit = {},
+    onBeginScaleGesture: () -> Unit = {},
+    onScale: (String, Float) -> Unit = { _, _ -> },
 ) {
     var viewScale by remember { mutableFloatStateOf(0.15f) }
     var viewOffset by remember { mutableStateOf(Offset.Zero) }
@@ -81,6 +86,8 @@ fun EditorCanvas(
     val currentOnMove by rememberUpdatedState(onMove)
     val currentOnResize by rememberUpdatedState(onResize)
     val currentOnViewTransform by rememberUpdatedState(onViewTransform)
+    val currentOnBeginScaleGesture by rememberUpdatedState(onBeginScaleGesture)
+    val currentOnScale by rememberUpdatedState(onScale)
 
     // Кэш декодированных Bitmap по src (LRU-подобный, простой)
     val bitmapCache = remember { mutableMapOf<String, Bitmap?>() }
@@ -120,6 +127,17 @@ fun EditorCanvas(
     fun hitTestHandle(canvasPoint: Offset): Handle? {
         val el = currentState.selectedElement ?: return null
         val r = 24f / viewScale // радиус захвата ручки в координатах канваса
+
+        // Ручка пропорционального масштабирования — правый нижний угол,
+        // чуть снаружи рамки. Проверяется первой (приоритет над SE).
+        val scalePos = Offset(
+            el.x + el.w + SCALE_HANDLE_OFFSET / viewScale,
+            el.y + el.h + SCALE_HANDLE_OFFSET / viewScale,
+        )
+        if (abs(canvasPoint.x - scalePos.x) < r && abs(canvasPoint.y - scalePos.y) < r) {
+            return Handle.SCALE
+        }
+
         val handles = mapOf(
             Handle.NW to Offset(el.x, el.y),
             Handle.N to Offset(el.x + el.w / 2, el.y),
@@ -209,6 +227,21 @@ fun EditorCanvas(
                                     mode = GestureMode.RESIZE
                                     activeHandle = activeHandle ?: handleHit
                                     val el = currentState.selectedElement
+                                    if (el != null && !el.locked && activeHandle == Handle.SCALE) {
+                                        // Пропорциональное масштабирование:
+                                        // рамка + изображение + шрифт текста
+                                        if (!gestureStarted) {
+                                            gestureStarted = true
+                                            currentOnBeginScaleGesture()
+                                        }
+                                        val current = screenToCanvas(change.position)
+                                        val newW = current.x - el.x - SCALE_HANDLE_OFFSET / viewScale
+                                        if (newW > 10f) {
+                                            currentOnScale(el.id, newW)
+                                        }
+                                        change.consume()
+                                        continue
+                                    }
                                     if (el != null && !el.locked) {
                                         if (!gestureStarted) {
                                             gestureStarted = true
@@ -228,7 +261,7 @@ fun EditorCanvas(
                                             Handle.SW -> { left = current.x; bottom = current.y }
                                             Handle.S -> bottom = current.y
                                             Handle.SE -> { right = current.x; bottom = current.y }
-                                            null -> {}
+                                            Handle.SCALE, null -> {}
                                         }
                                         if (right - left >= 10f && bottom - top >= 10f) {
                                             currentOnResize(el.id, left, top, right - left, bottom - top)
@@ -371,13 +404,21 @@ fun EditorCanvas(
                     if (el.isImage) {
                         val bmp = bitmapFor(el.src)
                         if (bmp != null) {
+                            // Растягивание вкл: картинка заполняет рамку целиком.
+                            // Растягивание выкл: картинка вписывается по центру
+                            // рамки без искажений (как ведёт себя текст).
+                            val dst = if (settings.imageStretchEnabled) {
+                                android.graphics.RectF(el.x, el.y, el.x + el.w, el.y + el.h)
+                            } else {
+                                val scale = minOf(el.w / bmp.width, el.h / bmp.height)
+                                val dw = bmp.width * scale
+                                val dh = bmp.height * scale
+                                val dx = el.x + (el.w - dw) / 2f
+                                val dy = el.y + (el.h - dh) / 2f
+                                android.graphics.RectF(dx, dy, dx + dw, dy + dh)
+                            }
                             drawIntoCanvasWithAlpha(alpha) {
-                                it.nativeCanvas.drawBitmap(
-                                    bmp,
-                                    null,
-                                    android.graphics.RectF(el.x, el.y, el.x + el.w, el.y + el.h),
-                                    null,
-                                )
+                                it.nativeCanvas.drawBitmap(bmp, null, dst, null)
                             }
                         } else {
                             // Плейсхолдер, если ассет не декодировался
@@ -422,6 +463,53 @@ fun EditorCanvas(
                             style = Stroke(width = 2.5f / viewScale),
                         )
                     }
+
+                    // Ручка пропорционального масштабирования (правый нижний
+                    // угол, снаружи): залитый кружок акцентного цвета с
+                    // диагональной стрелкой. Масштабирует изображение и текст
+                    // пропорционально, не растягивая.
+                    val scaleCenter = Offset(
+                        el.x + el.w + SCALE_HANDLE_OFFSET / viewScale,
+                        el.y + el.h + SCALE_HANDLE_OFFSET / viewScale,
+                    )
+                    val scaleR = 11f / viewScale
+                    // Линия-связка от угла к ручке
+                    drawLine(
+                        color = colors.selection.copy(alpha = 0.55f),
+                        start = Offset(el.x + el.w, el.y + el.h),
+                        end = Offset(
+                            scaleCenter.x - scaleR * 0.7f,
+                            scaleCenter.y - scaleR * 0.7f,
+                        ),
+                        strokeWidth = 1.5f / viewScale,
+                    )
+                    drawCircle(color = colors.selection, radius = scaleR, center = scaleCenter)
+                    drawCircle(
+                        color = Color.White,
+                        radius = scaleR,
+                        center = scaleCenter,
+                        style = Stroke(width = 1.5f / viewScale),
+                    )
+                    // Диагональная стрелка внутри
+                    val a = scaleR * 0.45f
+                    drawLine(
+                        color = Color.White,
+                        start = Offset(scaleCenter.x - a, scaleCenter.y - a),
+                        end = Offset(scaleCenter.x + a, scaleCenter.y + a),
+                        strokeWidth = 2f / viewScale,
+                    )
+                    drawLine(
+                        color = Color.White,
+                        start = Offset(scaleCenter.x + a, scaleCenter.y + a),
+                        end = Offset(scaleCenter.x + a, scaleCenter.y),
+                        strokeWidth = 2f / viewScale,
+                    )
+                    drawLine(
+                        color = Color.White,
+                        start = Offset(scaleCenter.x + a, scaleCenter.y + a),
+                        end = Offset(scaleCenter.x, scaleCenter.y + a),
+                        strokeWidth = 2f / viewScale,
+                    )
                 }
 
                 // ---------- Рамка рабочего поля ----------

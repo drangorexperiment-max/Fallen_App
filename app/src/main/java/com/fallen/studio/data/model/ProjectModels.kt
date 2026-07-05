@@ -62,6 +62,7 @@ data class CanvasElement(
     val fontWeight: String? = null,      // "400" | "700" | "bold" и т.п.
     val color: String? = null,           // hex "#RRGGBB"
     val textAlign: String? = null,       // "left" | "center" | "right"
+    val verticalAlign: String? = null,   // "top" | "middle" (по умолчанию middle — как в HTML-версии)
     val strokeWidth: Float? = null,
     val strokeColor: String? = null,
     val lineHeight: Float? = null,       // 0..100 (слайдер из старой версии)

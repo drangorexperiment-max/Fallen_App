@@ -153,6 +153,8 @@ fun EditorScreen(
                     onBeginGesture = viewModel::beginGesture,
                     onMove = viewModel::moveElement,
                     onResize = viewModel::resizeElement,
+                    onBeginScaleGesture = viewModel::beginScaleGesture,
+                    onScale = viewModel::scaleElement,
                     onViewTransform = { viewScale = it },
                     modifier = Modifier.fillMaxSize(),
                 )

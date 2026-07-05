@@ -13,9 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.FormatAlignLeft
-import androidx.compose.material.icons.automirrored.outlined.FormatAlignRight
-import androidx.compose.material.icons.outlined.FormatAlignCenter
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.FontDownload
 import androidx.compose.material3.DropdownMenuItem
@@ -28,9 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -201,7 +195,6 @@ fun PropertiesPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val isBold = element.fontWeight == "700" || element.fontWeight == "bold"
@@ -213,29 +206,38 @@ fun PropertiesPanel(
                     label = { Text("Жирный") },
                     shape = RoundedCornerShape(10.dp)
                 )
-                Spacer(Modifier.weight(1f))
-                SingleChoiceSegmentedButtonRow {
-                    SegmentedButton(
-                        selected = element.textAlign == "left",
-                        onClick = { onUpdate { it.copy(textAlign = "left") } },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.FormatAlignLeft, contentDescription = "Слева", modifier = Modifier.size(18.dp))
-                    }
-                    SegmentedButton(
-                        selected = element.textAlign == "center" || element.textAlign == null,
-                        onClick = { onUpdate { it.copy(textAlign = "center") } },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
-                    ) {
-                        Icon(Icons.Outlined.FormatAlignCenter, contentDescription = "По центру", modifier = Modifier.size(18.dp))
-                    }
-                    SegmentedButton(
-                        selected = element.textAlign == "right",
-                        onClick = { onUpdate { it.copy(textAlign = "right") } },
-                        shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
-                    ) {
-                        Icon(Icons.AutoMirrored.Outlined.FormatAlignRight, contentDescription = "Справа", modifier = Modifier.size(18.dp))
-                    }
+            }
+
+            // Выравнивание: 5 режимов, как просил пользователь.
+            // Горизонталь (left/center/right) + вертикаль (top/middle):
+            // угловые режимы = left+top и right+top.
+            PanelSectionTitle("Выравнивание")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                val hAlign = element.textAlign ?: "center"
+                val vAlign = element.verticalAlign ?: "middle"
+                val modes = listOf(
+                    Triple("По левому краю", "left", "middle"),
+                    Triple("По центру", "center", "middle"),
+                    Triple("По правому краю", "right", "middle"),
+                    Triple("По левому верхнему углу", "left", "top"),
+                    Triple("По правому верхнему углу", "right", "top"),
+                )
+                modes.forEach { (label, h, v) ->
+                    val selected = hAlign == h && vAlign == v
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            onUpdate { it.copy(textAlign = h, verticalAlign = v) }
+                        },
+                        label = { Text(label) },
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
 

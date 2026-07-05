@@ -92,6 +92,15 @@ object TextElementRenderer {
                 .setIncludePad(false)
                 .build()
 
+        // Вертикальное позиционирование внутри рамки (как в HTML-версии,
+        // где текст был по центру рамки). "top" прижимает к верху —
+        // для режимов «по верхнему углу».
+        val measuredHeight = buildLayout(basePaint()).height.toFloat()
+        val verticalOffset = when (el.verticalAlign) {
+            "top" -> 0f
+            else -> ((el.h - measuredHeight) / 2f).coerceAtLeast(0f)
+        }
+
         // ---------- 1. ТЕНЕВОЙ ПРОХОД (fill + stroke единой формой) ----------
         if (shadowEnabled) {
             val blur = (el.shadowBlur ?: 20f).coerceAtLeast(0.1f)
@@ -107,7 +116,7 @@ object TextElementRenderer {
             )
 
             canvas.save()
-            canvas.translate(el.x + offsetX, el.y + offsetY)
+            canvas.translate(el.x + offsetX, el.y + verticalOffset + offsetY)
 
             // Тень от обводки — рисуем stroke-форму в цвете тени с размытием
             if (hasStroke) {
@@ -134,7 +143,7 @@ object TextElementRenderer {
 
         // ---------- 2. ОБВОДКА ----------
         canvas.save()
-        canvas.translate(el.x, el.y)
+        canvas.translate(el.x, el.y + verticalOffset)
 
         if (hasStroke) {
             val strokePaint = basePaint().apply {
