@@ -109,7 +109,7 @@ fun ExportPanel(
         }
     }
 
-    // SAF: экспорт файла проекта (.uiproj) для передачи другим людям
+    // SAF: экспорт файла проекта (.fallen) для передачи другим людям
     val saveProjectLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->

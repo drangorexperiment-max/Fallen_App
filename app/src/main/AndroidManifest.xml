@@ -2,6 +2,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Разрешения приложения.
+         Fallen работает с изображениями (галерея), файлами проектов
+         и шрифтами через проводник, а также открывает ссылки на соцсети. -->
+
+    <!-- Доступ к изображениям галереи (Android 13+) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Доступ к хранилищу на старых версиях Android (до 12 включительно) -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Запись экспортированных файлов на старых версиях Android (до 9) -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+    <!-- Интернет — открытие ссылок Telegram / VK -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -22,15 +39,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Открытие .uiproj и .fallen файлов -->
+            <!-- Открытие файлов проекта .fallen (и старых .uiproj для совместимости) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="content" />
                 <data android:mimeType="*/*" />
-                <data android:pathPattern=".*\\.uiproj" />
                 <data android:pathPattern=".*\\.fallen" />
+                <data android:pathPattern=".*\\.uiproj" />
             </intent-filter>
         </activity>
 

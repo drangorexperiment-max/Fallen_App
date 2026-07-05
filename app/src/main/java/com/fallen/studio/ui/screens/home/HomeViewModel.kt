@@ -68,7 +68,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Экспорт проекта в файл (.uiproj), чтобы передать другому
+     * Экспорт проекта в файл (.fallen), чтобы передать другому
      * человеку — он сможет импортировать его у себя.
      */
     fun exportProject(id: String, uri: Uri) {
@@ -86,7 +86,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Импорт файла проекта (.uiproj, .fallen или .json).
+     * Импорт файла проекта (.fallen, старого .uiproj или .json).
      * Проект сохраняется и сразу открывается.
      */
     fun importProject(uri: Uri) {
@@ -94,7 +94,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             val project = repository.importFromUri(uri)
             if (project == null) {
                 _state.value = _state.value.copy(
-                    toast = "Не удалось прочитать файл. Поддерживаются .uiproj, .fallen и .json",
+                    toast = "Не удалось прочитать файл. Поддерживаются .fallen, .uiproj и .json",
                 )
                 return@launch
             }

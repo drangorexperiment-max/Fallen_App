@@ -69,7 +69,7 @@ import com.fallen.studio.ui.theme.FallenTheme
 import com.fallen.studio.util.ImageUtils
 
 /**
- * Главный экран Fallen: список проектов, создание, импорт .uiproj,
+ * Главный экран Fallen: список проектов, создание, импорт .fallen,
  * настройки.
  */
 @Composable
@@ -211,7 +211,7 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = "Создайте новый проект или импортируйте\nфайл проекта (.uiproj)",
+                        text = "Создайте новый проект или импортируйте\nфайл проекта (.fallen)",
                         fontSize = 13.sp,
                         color = colors.textSecondary,
                         lineHeight = 19.sp,
@@ -232,7 +232,7 @@ fun HomeScreen(
                             onDelete = { viewModel.deleteProject(project.id) },
                             onExport = {
                                 exportProjectId = project.id
-                                exportLauncher.launch("${project.name}.uiproj")
+                                exportLauncher.launch("${project.name}.fallen")
                             },
                         )
                     }

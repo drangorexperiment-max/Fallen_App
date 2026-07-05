@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -112,14 +113,21 @@ fun EditorScreen(
         }
     }
 
+    // Фон экрана совпадает с фоном области холста — под верхним и нижним
+    // меню больше нет второго тёмно-серого слоя
+    val editorBackground = if (isDarkTheme)
+        androidx.compose.ui.graphics.Color(0xFF07070D)
+    else
+        androidx.compose.ui.graphics.Color(0xFFE4E4EC)
+
     Scaffold(
-        containerColor = colors.appBackground,
+        containerColor = editorBackground,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(colors.appBackground)
+                .background(editorBackground)
                 .padding(padding)
                 .statusBarsPadding(),
         ) {
@@ -526,6 +534,9 @@ private fun BottomBarItem(
         highlight -> MaterialTheme.colorScheme.onSurface
         else -> colors.textSecondary
     }
+    // ИСПРАВЛЕНИЕ: у контейнера иконки фиксированный размер, а бейдж
+    // рисуется поверх через offset и НЕ участвует в раскладке — поэтому
+    // иконка не съезжает и панель не увеличивается при добавлении элементов.
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -538,7 +549,10 @@ private fun BottomBarItem(
             )
             .padding(horizontal = 14.dp, vertical = 6.dp),
     ) {
-        Box {
+        Box(
+            modifier = Modifier.size(24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.material3.LocalContentColor provides contentColor,
             ) {
@@ -549,7 +563,7 @@ private fun BottomBarItem(
                     containerColor = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(start = 14.dp, bottom = 12.dp),
+                        .offset(x = 8.dp, y = (-6).dp),
                 ) {
                     Text(text = badge.toString(), fontSize = 9.sp)
                 }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
@@ -74,6 +76,9 @@ fun EditorCanvas(
     var viewOffset by remember { mutableStateOf(Offset.Zero) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var initialized by remember { mutableStateOf(false) }
+    // Пока пользователь сам не двигал/не масштабировал вид,
+    // холст автоматически центрируется заново
+    var userMoved by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
 
@@ -109,6 +114,15 @@ fun EditorCanvas(
             (containerSize.height - currentState.canvas.h * viewScale) / 2f,
         )
         currentOnViewTransform(viewScale)
+    }
+
+    // ИСПРАВЛЕНИЕ ЦЕНТРИРОВАНИЯ: раньше fitToScreen вызывался только один раз
+    // при первой отрисовке — до того как загружался реальный размер холста,
+    // поэтому холст оказывался не по центру. Теперь центрирование повторяется
+    // при изменении размера контейнера или холста, пока пользователь
+    // сам не начал двигать/масштабировать вид.
+    LaunchedEffect(containerSize, state.canvas.w, state.canvas.h) {
+        if (!userMoved) fitToScreen()
     }
 
     fun screenToCanvas(p: Offset): Offset =
@@ -156,6 +170,7 @@ fun EditorCanvas(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .onSizeChanged { containerSize = it }
             .background(if (isDarkTheme) Color(0xFF07070D) else Color(0xFFE4E4EC)),
     ) {
         Canvas(
@@ -190,6 +205,7 @@ fun EditorCanvas(
                                 // Как только начали пан/зум, перетаскивание
                                 // элемента больше не активируется до конца жеста.
                                 mode = GestureMode.PAN_ZOOM
+                                userMoved = true
                                 val zoom = event.calculateZoom()
                                 val pan = event.calculatePan()
                                 val centroid = event.calculateCentroid()
@@ -285,6 +301,7 @@ fun EditorCanvas(
                                 else -> {
                                     // Один палец по пустому месту — пан вида
                                     mode = GestureMode.PAN
+                                    userMoved = true
                                     viewOffset += delta
                                     change.consume()
                                 }

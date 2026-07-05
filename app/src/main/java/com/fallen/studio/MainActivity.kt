@@ -5,8 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.lifecycle.Lifecycle
+import androidx.navigation.NavHostController
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -25,6 +30,23 @@ import com.fallen.studio.ui.screens.home.HomeScreen
 import com.fallen.studio.ui.screens.settings.SettingsScreen
 import com.fallen.studio.ui.screens.splash.SplashScreen
 import com.fallen.studio.ui.theme.FallenTheme
+
+/**
+ * Безопасная навигация: выполняется только когда текущий экран RESUMED.
+ * Это устраняет «анимация иногда не срабатывает» — быстрые повторные тапы
+ * во время перехода раньше ставили в стек дубликат экрана без анимации.
+ */
+private fun NavHostController.navigateSafe(route: String) {
+    if (currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) {
+        navigate(route) { launchSingleTop = true }
+    }
+}
+
+private fun NavHostController.popBackStackSafe() {
+    if (currentBackStackEntry?.lifecycle?.currentState == Lifecycle.State.RESUMED) {
+        popBackStack()
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,34 +73,40 @@ private fun FallenApp() {
     FallenTheme(darkTheme = isDark) {
         val navController = rememberNavController()
 
-        // Быстрое «перелистывание»: новый экран въезжает справа,
-        // при возврате — уезжает вправо (180 мс)
+        // Плавное «перелистывание»: новый экран въезжает справа поверх,
+        // старый слегка уезжает с параллаксом и притемняется.
+        // 320 мс + Emphasized-кривая Material 3 — визуально плавно,
+        // без ощущения «низкого fps» от слишком короткого тайминга.
+        val easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+        val duration = 320
         NavHost(
             navController = navController,
             startDestination = "splash",
             enterTransition = {
                 slideIntoContainer(
                     AnimatedContentTransitionScope.SlideDirection.Left,
-                    animationSpec = tween(180),
-                )
+                    animationSpec = tween(duration, easing = easing),
+                ) + fadeIn(animationSpec = tween(duration / 2))
             },
             exitTransition = {
                 slideOutOfContainer(
                     AnimatedContentTransitionScope.SlideDirection.Left,
-                    animationSpec = tween(180),
-                )
+                    animationSpec = tween(duration, easing = easing),
+                    targetOffset = { it / 3 }, // параллакс: уезжает на треть
+                ) + fadeOut(animationSpec = tween(duration, easing = easing), targetAlpha = 0.6f)
             },
             popEnterTransition = {
                 slideIntoContainer(
                     AnimatedContentTransitionScope.SlideDirection.Right,
-                    animationSpec = tween(180),
-                )
+                    animationSpec = tween(duration, easing = easing),
+                    initialOffset = { it / 3 },
+                ) + fadeIn(animationSpec = tween(duration / 2), initialAlpha = 0.6f)
             },
             popExitTransition = {
                 slideOutOfContainer(
                     AnimatedContentTransitionScope.SlideDirection.Right,
-                    animationSpec = tween(180),
-                )
+                    animationSpec = tween(duration, easing = easing),
+                ) + fadeOut(animationSpec = tween(duration / 2))
             },
         ) {
             composable("splash") {
@@ -95,12 +123,12 @@ private fun FallenApp() {
                 HomeScreen(
                     onOpenProject = { projectId ->
                         val route = if (projectId == null) "editor" else "editor?projectId=$projectId"
-                        navController.navigate(route)
+                        navController.navigateSafe(route)
                     },
                     onCreateProject = { w, h ->
-                        navController.navigate("editor?canvasW=$w&canvasH=$h")
+                        navController.navigateSafe("editor?canvasW=$w&canvasH=$h")
                     },
-                    onOpenSettings = { navController.navigate("settings") },
+                    onOpenSettings = { navController.navigateSafe("settings") },
                 )
             }
 
@@ -130,13 +158,13 @@ private fun FallenApp() {
                     initialCanvasW = canvasW,
                     initialCanvasH = canvasH,
                     isDarkTheme = isDark,
-                    onBack = { navController.popBackStack() },
+                    onBack = { navController.popBackStackSafe() },
                 )
             }
 
             composable("settings") {
                 SettingsScreen(
-                    onBack = { navController.popBackStack() },
+                    onBack = { navController.popBackStackSafe() },
                 )
             }
         }
