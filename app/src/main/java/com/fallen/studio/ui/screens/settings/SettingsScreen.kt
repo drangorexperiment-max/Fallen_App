@@ -2,6 +2,12 @@ package com.fallen.studio.ui.screens.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,27 +24,26 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.Brush
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.GridOn
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,12 +53,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.fallen.studio.R
 import com.fallen.studio.data.ThemeMode
 import com.fallen.studio.ui.components.FallenLogoMark
 import com.fallen.studio.ui.components.PanelSectionTitle
@@ -61,17 +69,21 @@ import com.fallen.studio.ui.components.SliderRow
 import com.fallen.studio.ui.components.SwitchRow
 import com.fallen.studio.ui.theme.FallenTheme
 
-private enum class SettingsTab(val title: String, val icon: ImageVector) {
-    APPEARANCE("Внешний вид", Icons.Outlined.Brush),
-    CANVAS("Холст", Icons.Outlined.GridOn),
-    EDITOR("Редактор", Icons.Outlined.Tune),
-    EXPORT("Экспорт", Icons.Outlined.Code),
-    ABOUT("О приложении", Icons.Outlined.Info),
+private enum class SettingsSection(
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector,
+) {
+    APPEARANCE("Внешний вид", "Тема приложения", Icons.Outlined.Brush),
+    CANVAS("Холст", "Сетка, привязка, направляющие", Icons.Outlined.GridOn),
+    EDITOR("Редактор", "Автосохранение, изображения, поведение", Icons.Outlined.Tune),
+    EXPORT("Экспорт", "Форматы и параметры", Icons.Outlined.Code),
+    ABOUT("О приложении", "С чего начать, обучение, контакты", Icons.Outlined.Info),
 }
 
 /**
- * Экран настроек Fallen с вкладками:
- * Внешний вид / Холст / Редактор / Экспорт / О приложении.
+ * Экран настроек Fallen в виде подменю:
+ * главный список разделов -> вложенный экран раздела.
  */
 @Composable
 fun SettingsScreen(
@@ -80,7 +92,8 @@ fun SettingsScreen(
 ) {
     val settings by viewModel.settings.collectAsState()
     val colors = FallenTheme.colors
-    var tab by remember { mutableStateOf(SettingsTab.APPEARANCE) }
+    var section by remember { mutableStateOf<SettingsSection?>(null) }
+    var tutorialOpen by remember { mutableStateOf(false) }
 
     Scaffold(containerColor = colors.appBackground) { padding ->
         Column(
@@ -97,7 +110,9 @@ fun SettingsScreen(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onBack) {
+                IconButton(onClick = {
+                    if (section != null) section = null else onBack()
+                }) {
                     Icon(
                         Icons.AutoMirrored.Outlined.ArrowBack,
                         contentDescription = "Назад",
@@ -105,84 +120,124 @@ fun SettingsScreen(
                     )
                 }
                 Text(
-                    text = "Настройки",
+                    text = section?.title ?: "Настройки",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
 
-            // Вкладки
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                SettingsTab.entries.forEach { t ->
-                    val active = t == tab
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            // Подменю: список разделов <-> содержимое раздела
+            AnimatedContent(
+                targetState = section,
+                transitionSpec = {
+                    if (targetState != null) {
+                        slideInHorizontally(tween(180)) { it } togetherWith
+                            slideOutHorizontally(tween(180)) { -it }
+                    } else {
+                        slideInHorizontally(tween(180)) { -it } togetherWith
+                            slideOutHorizontally(tween(180)) { it }
+                    }
+                },
+                label = "settings_section",
+            ) { current ->
+                if (current == null) {
+                    // Главный список разделов
+                    LazyColumn(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                                else colors.surfaceElevated,
-                            )
-                            .border(
-                                1.dp,
-                                if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                else colors.divider,
-                                RoundedCornerShape(12.dp),
-                            )
-                            .clickable { tab = t }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Icon(
-                            t.icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = if (active) MaterialTheme.colorScheme.primary else colors.textSecondary,
-                        )
-                        Text(
-                            text = t.title,
-                            fontSize = 13.sp,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (active) MaterialTheme.colorScheme.primary else colors.textSecondary,
-                        )
+                        item { Spacer(Modifier.height(4.dp)) }
+                        SettingsSection.entries.forEach { s ->
+                            item {
+                                SectionCard(section = s, onClick = { section = s })
+                            }
+                        }
+                        item { Spacer(Modifier.height(32.dp)) }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        when (current) {
+                            SettingsSection.APPEARANCE -> appearanceSection(settings.themeMode, viewModel)
+                            SettingsSection.CANVAS -> canvasSection(settings, viewModel)
+                            SettingsSection.EDITOR -> editorSection(settings, viewModel)
+                            SettingsSection.EXPORT -> exportSection(settings, viewModel)
+                            SettingsSection.ABOUT -> aboutSection(onOpenTutorial = { tutorialOpen = true })
+                        }
+                        item { Spacer(Modifier.height(32.dp)) }
                     }
                 }
             }
-
-            Spacer(Modifier.height(8.dp))
-
-            // Содержимое вкладки
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                when (tab) {
-                    SettingsTab.APPEARANCE -> appearanceTab(settings.themeMode, viewModel)
-                    SettingsTab.CANVAS -> canvasTab(settings, viewModel)
-                    SettingsTab.EDITOR -> editorTab(settings, viewModel)
-                    SettingsTab.EXPORT -> exportTab(settings, viewModel)
-                    SettingsTab.ABOUT -> aboutTab()
-                }
-                item { Spacer(Modifier.height(32.dp)) }
-            }
         }
+    }
+
+    if (tutorialOpen) {
+        TutorialOverlay(onClose = { tutorialOpen = false })
+    }
+}
+
+@Composable
+private fun SectionCard(section: SettingsSection, onClick: () -> Unit) {
+    val colors = FallenTheme.colors
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.surfaceElevated)
+            .border(1.dp, colors.divider, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                section.icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = section.title,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = section.subtitle,
+                fontSize = 12.sp,
+                color = colors.textSecondary,
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Outlined.ArrowForward,
+            contentDescription = null,
+            tint = colors.textSecondary,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
 // ==================================================================
-// Вкладка «Внешний вид»
+// Раздел «Внешний вид»
 // ==================================================================
 
-private fun androidx.compose.foundation.lazy.LazyListScope.appearanceTab(
+private fun androidx.compose.foundation.lazy.LazyListScope.appearanceSection(
     themeMode: ThemeMode,
     vm: SettingsViewModel,
 ) {
@@ -269,10 +324,10 @@ private fun ThemeOption(
 }
 
 // ==================================================================
-// Вкладка «Канвас»
+// Раздел «Холст»
 // ==================================================================
 
-private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
+private fun androidx.compose.foundation.lazy.LazyListScope.canvasSection(
     settings: com.fallen.studio.data.AppSettings,
     vm: SettingsViewModel,
 ) {
@@ -280,7 +335,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
     item {
         SwitchRow(
             label = "Показывать сетку",
-            description = "Ровная квадратная сетка на холсте",
+            description = "Сетка подстраивается под разрешение холста",
             checked = settings.gridEnabled,
             onCheckedChange = vm::setGridEnabled,
         )
@@ -297,7 +352,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
     item {
         SwitchRow(
             label = "Привязка к сетке",
-            description = "Элементы прилипают к линиям сетки при перемещении",
+            description = "Границы элементов прилипают к линиям сетки при перемещении и изменении размера",
             checked = settings.snapToGrid,
             onCheckedChange = vm::setSnapToGrid,
         )
@@ -366,10 +421,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasTab(
 }
 
 // ==================================================================
-// Вкладка «Редактор»
+// Раздел «Редактор»
 // ==================================================================
 
-private fun androidx.compose.foundation.lazy.LazyListScope.editorTab(
+private fun androidx.compose.foundation.lazy.LazyListScope.editorSection(
     settings: com.fallen.studio.data.AppSettings,
     vm: SettingsViewModel,
 ) {
@@ -377,18 +432,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorTab(
     item {
         SwitchRow(
             label = "Автосохранение",
-            description = "Автоматически сохранять черновик проекта",
+            description = "Каждое изменение автоматически сохраняет проект — он сразу появляется на главном экране",
             checked = settings.autosaveEnabled,
             onCheckedChange = vm::setAutosaveEnabled,
         )
     }
+    item { PanelSectionTitle("Изображения") }
     item {
-        SliderRow(
-            label = "Интервал автосохранения",
-            value = settings.autosaveIntervalSec.toFloat(),
-            valueRange = 10f..300f,
-            valueLabel = { "${it.toInt()} сек" },
-            onValueChange = { vm.setAutosaveInterval(it.toInt()) },
+        SwitchRow(
+            label = "Растягивание изображения",
+            description = "Вкл: изображение растягивается под рамку. Выкл: рамка растёт, а изображение вписывается по центру без искажений (как текст)",
+            checked = settings.imageStretchEnabled,
+            onCheckedChange = vm::setImageStretchEnabled,
         )
     }
     item { PanelSectionTitle("История изменений") }
@@ -495,10 +550,10 @@ private fun DefaultCanvasEditor(
 }
 
 // ==================================================================
-// Вкладка «Экспорт»
+// Раздел «Экспорт»
 // ==================================================================
 
-private fun androidx.compose.foundation.lazy.LazyListScope.exportTab(
+private fun androidx.compose.foundation.lazy.LazyListScope.exportSection(
     settings: com.fallen.studio.data.AppSettings,
     vm: SettingsViewModel,
 ) {
@@ -548,17 +603,19 @@ private fun androidx.compose.foundation.lazy.LazyListScope.exportTab(
 }
 
 // ==================================================================
-// Вкладка «О приложении»
+// Раздел «О приложении»
 // ==================================================================
 
-private fun androidx.compose.foundation.lazy.LazyListScope.aboutTab() {
+private fun androidx.compose.foundation.lazy.LazyListScope.aboutSection(
+    onOpenTutorial: () -> Unit,
+) {
     item {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 24.dp),
+                .padding(vertical = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             FallenLogoMark(size = 72.dp, glowing = true)
             Text(
@@ -572,49 +629,39 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutTab() {
                 fontSize = 13.sp,
                 color = FallenTheme.colors.textSecondary,
             )
-            Text(
-                text = "Мобильная студия дизайна игровых интерфейсов.\nРасставляйте ассеты и текст на холсте, настраивайте\nстили и экспортируйте готовые макеты в код.",
-                fontSize = 13.sp,
-                color = FallenTheme.colors.textSecondary,
-                lineHeight = 20.sp,
-                modifier = Modifier.padding(horizontal = 24.dp),
-            )
         }
     }
-    item { PanelSectionTitle("Возможности") }
+    item { PanelSectionTitle("С чего начать") }
     item {
-        val features = listOf(
-            "Работа с ассетами: импорт изображений, слои, дублирование",
-            "Текст с обводкой, тенью и своими шрифтами (.ttf/.otf)",
-            "Магнитная привязка и привязка к сетке",
-            "Экспорт координат в Unity C#, JSON, CSV, XML и текст",
-            "Экспорт макета в PNG-изображение",
-            "Экспорт и импорт файлов проекта для обмена",
-            "Откат и возврат изменений (undo/redo)",
-            "Автосохранение и светлая/тёмная темы",
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            features.forEach { f ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = f,
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
+        val colors = FallenTheme.colors
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(colors.surfaceElevated)
+                .border(1.dp, colors.divider, RoundedCornerShape(14.dp))
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            listOf(
+                "1. Нажмите «Новый проект» на главном экране и выберите разрешение холста.",
+                "2. Через панель «Ассеты» добавьте свои изображения — кнопки, иконки, рамки.",
+                "3. Через панель «Текст» добавьте надписи: шрифт, обводка, тень настраиваются в свойствах.",
+                "4. Перетаскивайте элементы пальцем. Точки по краям меняют размер, а точка в правом нижнем углу масштабирует пропорционально.",
+                "5. Включите сетку и привязку в настройках, чтобы выравнивать элементы идеально ровно.",
+                "6. Готовый макет экспортируйте в PNG или в код (Unity C#, JSON и другие) через панель «Экспорт».",
+            ).forEach { step ->
+                Text(
+                    text = step,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
             }
         }
     }
-    item { PanelSectionTitle("Мы на связи") }
+    item { PanelSectionTitle("Обучение") }
     item {
-        val context = LocalContext.current
         val colors = FallenTheme.colors
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -623,50 +670,207 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutTab() {
                 .clip(RoundedCornerShape(14.dp))
                 .background(colors.surfaceElevated)
                 .border(1.dp, colors.divider, RoundedCornerShape(14.dp))
-                .clickable {
-                    val intent = Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://t.me/Fallen_OfficialGroup"),
-                    )
-                    runCatching { context.startActivity(intent) }
-                }
+                .clickable(onClick = onOpenTutorial)
                 .padding(14.dp),
         ) {
-            // Иконка Telegram (бумажный самолётик)
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .clip(CircleShape)
-                    .background(androidx.compose.ui.graphics.Color(0xFF229ED9)),
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.AutoMirrored.Filled.Send,
+                    Icons.Outlined.School,
                     contentDescription = null,
-                    tint = androidx.compose.ui.graphics.Color.White,
-                    modifier = Modifier.size(20.dp).padding(start = 2.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
                 )
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Telegram",
+                    text = "Пройти обучение",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = "Официальная группа Fallen",
+                    text = "Пошаговое знакомство с редактором. Можно пропустить в любой момент",
                     fontSize = 12.sp,
                     color = colors.textSecondary,
                 )
             }
             Icon(
-                Icons.AutoMirrored.Outlined.OpenInNew,
-                contentDescription = "Открыть",
+                Icons.AutoMirrored.Outlined.ArrowForward,
+                contentDescription = null,
                 tint = colors.textSecondary,
                 modifier = Modifier.size(18.dp),
             )
+        }
+    }
+    item { PanelSectionTitle("Мы на связи") }
+    item {
+        val context = LocalContext.current
+        // Круглые кнопки соцсетей без подписей
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+        ) {
+            SocialCircleButton(
+                iconRes = R.drawable.ic_telegram,
+                contentDescription = "Telegram — официальная группа Fallen",
+                onClick = {
+                    val intent = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://t.me/Fallen_OfficialGroup"),
+                    )
+                    runCatching { context.startActivity(intent) }
+                },
+            )
+            SocialCircleButton(
+                iconRes = R.drawable.ic_vk,
+                contentDescription = "VK — официальная группа Fallen",
+                onClick = {
+                    val intent = Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://m.vk.com/fallen_officialgroup"),
+                    )
+                    runCatching { context.startActivity(intent) }
+                },
+            )
+        }
+    }
+}
+
+/** Круглая кнопка соцсети: белый круг с PNG-иконкой, без текста */
+@Composable
+private fun SocialCircleButton(
+    iconRes: Int,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val colors = FallenTheme.colors
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(Color.White)
+            .border(1.dp, colors.divider, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Image(
+            painter = painterResource(id = iconRes),
+            contentDescription = contentDescription,
+            modifier = Modifier.size(28.dp),
+        )
+    }
+}
+
+// ==================================================================
+// Обучение: пошаговый оверлей, можно пропустить в любой момент
+// ==================================================================
+
+private data class TutorialStep(val title: String, val body: String)
+
+private val tutorialSteps = listOf(
+    TutorialStep(
+        "Добро пожаловать в Fallen",
+        "Fallen помогает расставлять элементы интерфейса на холсте и переносить готовую расстановку в игру или приложение. Пройдём по основам за пару минут.",
+    ),
+    TutorialStep(
+        "Создание проекта",
+        "На главном экране нажмите «Новый проект» и выберите разрешение холста — базовое или своё. Проект сохраняется автоматически при каждом изменении.",
+    ),
+    TutorialStep(
+        "Ассеты и текст",
+        "Нижняя панель редактора: «Ассеты» — импорт ваших изображений, «Текст» — надписи со шрифтами, обводкой и тенью. Всё добавленное появляется на холсте.",
+    ),
+    TutorialStep(
+        "Перемещение и размер",
+        "Перетаскивайте элементы пальцем. Точки на рамке меняют размер, а отдельная точка в правом нижнем углу масштабирует элемент пропорционально — вместе со шрифтом текста.",
+    ),
+    TutorialStep(
+        "Сетка и привязка",
+        "В настройках холста включите сетку и привязку — элементы будут прилипать к линиям, а магнитная привязка поможет выравнивать по центру и краям.",
+    ),
+    TutorialStep(
+        "Экспорт",
+        "Панель «Экспорт» выгружает макет в PNG или в код: Unity C#, JSON, CSV, XML. Файл проекта .fallen можно сохранить и отправить другому пользователю.",
+    ),
+)
+
+@Composable
+private fun TutorialOverlay(onClose: () -> Unit) {
+    val colors = FallenTheme.colors
+    var step by remember { mutableIntStateOf(0) }
+    val last = step == tutorialSteps.lastIndex
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable(onClick = {}),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(24.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(colors.surfaceElevated)
+                .border(1.dp, colors.divider, RoundedCornerShape(20.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Индикатор шагов
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                tutorialSteps.forEachIndexed { i, _ ->
+                    Box(
+                        modifier = Modifier
+                            .height(4.dp)
+                            .weight(1f)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                if (i <= step) MaterialTheme.colorScheme.primary
+                                else colors.divider,
+                            ),
+                    )
+                }
+            }
+            Text(
+                text = tutorialSteps[step].title,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = tutorialSteps[step].body,
+                fontSize = 14.sp,
+                lineHeight = 21.sp,
+                color = colors.textSecondary,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onClose) {
+                    Text("Пропустить")
+                }
+                Spacer(Modifier.weight(1f))
+                if (step > 0) {
+                    TextButton(onClick = { step-- }) {
+                        Text("Назад")
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+                Button(onClick = {
+                    if (last) onClose() else step++
+                }) {
+                    Text(if (last) "Готово" else "Далее")
+                }
+            }
         }
     }
 }

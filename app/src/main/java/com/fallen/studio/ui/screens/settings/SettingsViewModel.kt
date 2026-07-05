@@ -36,6 +36,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setHapticFeedback(v: Boolean) = launch { repo.setHapticFeedback(v) }
     fun setShowSizeTooltip(v: Boolean) = launch { repo.setShowSizeTooltip(v) }
     fun setKeepAspectDefault(v: Boolean) = launch { repo.setKeepAspectDefault(v) }
+    fun setImageStretchEnabled(v: Boolean) = launch { repo.setImageStretchEnabled(v) }
     fun setDefaultExportFormat(v: String) = launch { repo.setDefaultExportFormat(v) }
     fun setExportImageScale(v: Float) = launch { repo.setExportImageScale(v) }
     fun setIncludeComments(v: Boolean) = launch { repo.setIncludeComments(v) }
