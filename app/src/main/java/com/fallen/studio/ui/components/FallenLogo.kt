@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import com.fallen.studio.R
 import com.fallen.studio.ui.theme.FallenTheme
 
@@ -59,7 +60,7 @@ fun FallenLogo(
                 contentDescription = "Логотип Fallen",
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(6.dpFraction()),
+                    .padding(6.dp),
             )
         }
     } else {
@@ -70,10 +71,6 @@ fun FallenLogo(
         )
     }
 }
-
-// Небольшой внутренний отступ логотипа внутри круга-подложки.
-// Вынесен в функцию, чтобы не хардкодить dp внутри composable-цепочки.
-private fun Int.dpFraction() = androidx.compose.ui.unit.Dp(this.toFloat())
 
 /**
  * Компактный знак Fallen для шапок и списков.
