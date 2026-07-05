@@ -404,14 +404,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasSection(
     item { PanelSectionTitle("Фон холста") }
     item {
         SwitchRow(
-            label = "Шахматный фон",
-            description = "Показывает прозрачность как в графических редакторах",
-            checked = settings.checkerboardBackground,
-            onCheckedChange = vm::setCheckerboardBackground,
-        )
-    }
-    item {
-        SwitchRow(
             label = "Затемнять область вне холста",
             description = "Холст сильнее выделяется на фоне",
             checked = settings.canvasDimOutside,
@@ -743,7 +735,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutSection(
     }
 }
 
-/** Круглая кнопка соцсети: белый круг с PNG-иконкой, без текста */
+/** Круглая кнопка соцсети: белый круг с векторной иконкой, без текста */
 @Composable
 private fun SocialCircleButton(
     iconRes: Int,
@@ -760,9 +752,12 @@ private fun SocialCircleButton(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Image(
+        // Векторные иконки белые в исходнике — тонируем тёмным,
+        // чтобы были видны на белом круге
+        Icon(
             painter = painterResource(id = iconRes),
             contentDescription = contentDescription,
+            tint = Color(0xFF1A1A22),
             modifier = Modifier.size(28.dp),
         )
     }
@@ -781,7 +776,7 @@ private val tutorialSteps = listOf(
     ),
     TutorialStep(
         "Создание проекта",
-        "На главном экране нажмите «Новый проект» и выберите разрешение холста — базовое или своё. Проект сохраняется автоматически при каждом изменении.",
+        "На глав��ом экране нажмите «Новый проект» и выберите разрешение холста — базовое или своё. Проект сохраняется автоматически при каждом изменении.",
     ),
     TutorialStep(
         "Ассеты и текст",

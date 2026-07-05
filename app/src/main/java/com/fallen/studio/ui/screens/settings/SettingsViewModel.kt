@@ -27,7 +27,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setSnapElementsSensitivity(v: Int) = launch { repo.setSnapElementsSensitivity(v) }
     fun setShowRulers(v: Boolean) = launch { repo.setShowRulers(v) }
     fun setShowCenterGuides(v: Boolean) = launch { repo.setShowCenterGuides(v) }
-    fun setCheckerboardBackground(v: Boolean) = launch { repo.setCheckerboardBackground(v) }
     fun setCanvasDimOutside(v: Boolean) = launch { repo.setCanvasDimOutside(v) }
     fun setAutosaveEnabled(v: Boolean) = launch { repo.setAutosaveEnabled(v) }
     fun setAutosaveInterval(v: Int) = launch { repo.setAutosaveInterval(v) }

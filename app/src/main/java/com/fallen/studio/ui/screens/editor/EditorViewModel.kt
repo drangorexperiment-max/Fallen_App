@@ -314,16 +314,25 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             if (aspect >= 1f) h = w / aspect else w = h * aspect
         }
 
+        // При включённой «Привязке к сетке» края нового элемента
+        // сразу выравниваются по линиям сетки
+        val rect = snapRectToGrid(
+            s.canvas.w / 2f - w / 2f,
+            s.canvas.h / 2f - h / 2f,
+            w,
+            h,
+        )
+
         val element = CanvasElement(
             id = "el$counter",
             type = "image",
             assetId = assetId,
             name = "${asset.name}_$counter",
             src = asset.src,
-            x = s.canvas.w / 2f - w / 2f,
-            y = s.canvas.h / 2f - h / 2f,
-            w = w,
-            h = h,
+            x = rect[0],
+            y = rect[1],
+            w = rect[2],
+            h = rect[3],
             z = s.elements.size,
         )
         _state.value = s.copy(
@@ -421,8 +430,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             h = 60f,
             z = s.elements.size,
         )
-        // Рамка нового текста сразу подгоняется под фактический размер текста
-        val fitted = fitTextBox(element)
+        // Рамка нового текста сразу подгоняется под фактический размер текста,
+        // а при включённой «Привязке к сетке» позиция выравнивается по линиям
+        val fitted = fitTextBox(element).let { fit ->
+            val cfg = settings.value
+            if (cfg.snapToGrid) {
+                val stepX = effectiveGridStep(s.canvas.w, cfg.gridSize)
+                val stepY = effectiveGridStep(s.canvas.h, cfg.gridSize)
+                fit.copy(
+                    x = Math.round(fit.x / stepX) * stepX,
+                    y = Math.round(fit.y / stepY) * stepY,
+                )
+            } else fit
+        }
         _state.value = s.copy(
             elements = s.elements + fitted,
             counter = counter,
@@ -434,6 +454,27 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // ---------- Операции над элементами ----------
+
+    /**
+     * Привязывает ВСЕ четыре края прямоугольника к линиям сетки
+     * (если включена «Привязка к сетке»). Используется при добавлении
+     * элементов на холст и при пропорциональном масштабировании —
+     * границы элемента всегда ровно лежат на сеточных линиях.
+     */
+    private fun snapRectToGrid(x: Float, y: Float, w: Float, h: Float): FloatArray {
+        val cfg = settings.value
+        if (!cfg.snapToGrid) return floatArrayOf(x, y, w, h)
+        val s = _state.value
+        val stepX = effectiveGridStep(s.canvas.w, cfg.gridSize)
+        val stepY = effectiveGridStep(s.canvas.h, cfg.gridSize)
+        val nx = Math.round(x / stepX) * stepX
+        val ny = Math.round(y / stepY) * stepY
+        // Правый/нижний края округляются к ближайшей линии,
+        // ширина/высота — минимум одна клетка
+        val right = (Math.round((x + w) / stepX) * stepX).coerceAtLeast(nx + stepX)
+        val bottom = (Math.round((y + h) / stepY) * stepY).coerceAtLeast(ny + stepY)
+        return floatArrayOf(nx, ny, right - nx, bottom - ny)
+    }
 
     /**
      * ИСПРАВЛЕНИЕ «текст выходит за рамку»: высота рамки текстового
@@ -492,23 +533,23 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         var ny = gestureRawY
         val cfg = settings.value
 
-        // Магнитная привязка (как в оригинале): к центру/краям холста
-        // и к границам других элементов. Работает от сырой пози��ии,
-        // поэтому элемент легко «отлипает» при дальнейшем движении.
-        if (cfg.snapEnabled) {
-            val snapped = applySnap(nx, ny, el.w, el.h, id, s)
-            nx = snapped.first
-            ny = snapped.second
-        }
-
-        // Привязка к сетке: округление к ближайшему узлу (не усечение).
-        // Шаг по X и Y считается от реального разрешения холста —
-        // тот же шаг, по которому рисуется сетка на канвасе.
+        // ИСПРАВЛЕНИЕ КРИВОЙ ПРИВЯЗКИ: раньше магнитная привязка
+        // (к краям холста и других элементов) применялась ВМЕСТЕ с сеточной
+        // и сдвигала элемент с линии сетки уже после округления.
+        // Теперь при включённой «Привязке к сетке» работает ТОЛЬКО сетка —
+        // границы элемента всегда ровно лежат на сеточных линиях.
         if (cfg.snapToGrid) {
             val stepX = effectiveGridStep(s.canvas.w, cfg.gridSize)
             val stepY = effectiveGridStep(s.canvas.h, cfg.gridSize)
             nx = Math.round(nx / stepX) * stepX
             ny = Math.round(ny / stepY) * stepY
+        } else if (cfg.snapEnabled) {
+            // Магнитная привязка: к центру/краям холста и к границам
+            // других элементов. Работает от сырой позиции, поэтому
+            // элемент легко «отлипает» при дальнейшем движении.
+            val snapped = applySnap(nx, ny, el.w, el.h, id, s)
+            nx = snapped.first
+            ny = snapped.second
         }
 
         _state.value = s.copy(
@@ -651,7 +692,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                             ),
                         )
                     } else {
-                        it.copy(w = w, h = h)
+                        // При включённой «Привязке к сетке» все края
+                        // прилипают к ближайшим линиям во время масштабирования
+                        val rect = snapRectToGrid(it.x, it.y, w, h)
+                        it.copy(x = rect[0], y = rect[1], w = rect[2], h = rect[3])
                     }
                 } else it
             },

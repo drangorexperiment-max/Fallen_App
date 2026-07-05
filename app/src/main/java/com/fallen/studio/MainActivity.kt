@@ -1,9 +1,14 @@
 package com.fallen.studio
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
@@ -49,9 +54,41 @@ private fun NavHostController.popBackStackSafe() {
 }
 
 class MainActivity : ComponentActivity() {
+
+    /** Диалог системного запроса разрешений (галерея / хранилище) */
+    private val permissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
+
+    /**
+     * Запрашивает разрешения, нужные приложению, при первом запуске:
+     * - Android 13+ — доступ к изображениям галереи (READ_MEDIA_IMAGES)
+     * - Android 12 и ниже — доступ к хранилищу (READ_EXTERNAL_STORAGE)
+     * - Android 9 и ниже — запись в хранилище (WRITE_EXTERNAL_STORAGE)
+     * Разрешения из манифеста сами по себе диалог не показывают —
+     * их нужно запрашивать в рантайме, что и делается здесь.
+     */
+    private fun requestNeededPermissions() {
+        val needed = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            needed += Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            needed += Manifest.permission.READ_EXTERNAL_STORAGE
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                needed += Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }
+        }
+        val notGranted = needed.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (notGranted.isNotEmpty()) {
+            permissionLauncher.launch(notGranted.toTypedArray())
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestNeededPermissions()
         setContent {
             FallenApp()
         }

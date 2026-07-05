@@ -28,7 +28,6 @@ data class AppSettings(
     val snapElementsSensitivity: Int = 5,
     val showRulers: Boolean = true,
     val showCenterGuides: Boolean = true,
-    val checkerboardBackground: Boolean = false,
     val canvasDimOutside: Boolean = true,
     // Редактор
     val autosaveEnabled: Boolean = true,
@@ -60,7 +59,6 @@ class SettingsRepository(private val context: Context) {
         val snapElementsSensitivity = intPreferencesKey("snap_elements_sensitivity")
         val showRulers = booleanPreferencesKey("show_rulers")
         val showCenterGuides = booleanPreferencesKey("show_center_guides")
-        val checkerboard = booleanPreferencesKey("checkerboard_bg")
         val canvasDimOutside = booleanPreferencesKey("canvas_dim_outside")
         val autosaveEnabled = booleanPreferencesKey("autosave_enabled")
         val autosaveInterval = intPreferencesKey("autosave_interval")
@@ -89,7 +87,6 @@ class SettingsRepository(private val context: Context) {
             snapElementsSensitivity = p[Keys.snapElementsSensitivity] ?: 5,
             showRulers = p[Keys.showRulers] ?: true,
             showCenterGuides = p[Keys.showCenterGuides] ?: true,
-            checkerboardBackground = p[Keys.checkerboard] ?: false,
             canvasDimOutside = p[Keys.canvasDimOutside] ?: true,
             autosaveEnabled = p[Keys.autosaveEnabled] ?: true,
             autosaveIntervalSec = p[Keys.autosaveInterval] ?: 30,
@@ -132,9 +129,6 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setShowCenterGuides(v: Boolean) =
         context.dataStore.edit { it[Keys.showCenterGuides] = v }
-
-    suspend fun setCheckerboardBackground(v: Boolean) =
-        context.dataStore.edit { it[Keys.checkerboard] = v }
 
     suspend fun setCanvasDimOutside(v: Boolean) =
         context.dataStore.edit { it[Keys.canvasDimOutside] = v }

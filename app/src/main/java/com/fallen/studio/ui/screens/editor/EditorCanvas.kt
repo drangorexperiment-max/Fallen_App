@@ -245,7 +245,7 @@ fun EditorCanvas(
                                     val el = currentState.selectedElement
                                     if (el != null && !el.locked && activeHandle == Handle.SCALE) {
                                         // Пропорциональное масштабирование:
-                                        // рамка + изображение + шрифт текста
+                                        // рамка + изображение + шрифт тек��та
                                         if (!gestureStarted) {
                                             gestureStarted = true
                                             currentOnBeginScaleGesture()
@@ -331,38 +331,11 @@ fun EditorCanvas(
                 )
 
                 // ---------- Фон рабочего поля ----------
-                if (settings.checkerboardBackground) {
-                    // Шахматный фон (прозрачность)
-                    val cell = 40f
-                    val c1 = if (isDarkTheme) Color(0xFF1E1E2C) else Color(0xFFEDEDF3)
-                    val c2 = if (isDarkTheme) Color(0xFF16161F) else Color(0xFFFFFFFF)
-                    var yy = 0f
-                    var rowIndex = 0
-                    while (yy < canvasH) {
-                        var xx = 0f
-                        var colIndex = 0
-                        while (xx < canvasW) {
-                            drawRect(
-                                color = if ((rowIndex + colIndex) % 2 == 0) c1 else c2,
-                                topLeft = Offset(xx, yy),
-                                size = Size(
-                                    minOf(cell, canvasW - xx),
-                                    minOf(cell, canvasH - yy),
-                                ),
-                            )
-                            xx += cell
-                            colIndex++
-                        }
-                        yy += cell
-                        rowIndex++
-                    }
-                } else {
-                    drawRect(
-                        color = colors.canvasBackground,
-                        topLeft = Offset.Zero,
-                        size = Size(canvasW, canvasH),
-                    )
-                }
+                drawRect(
+                    color = colors.canvasBackground,
+                    topLeft = Offset.Zero,
+                    size = Size(canvasW, canvasH),
+                )
 
                 // ---------- Сетка ----------
                 // Шаг подстраивается под разрешение холста (ровно делит его),
