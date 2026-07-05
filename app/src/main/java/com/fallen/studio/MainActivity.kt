@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -49,9 +51,35 @@ private fun FallenApp() {
     FallenTheme(darkTheme = isDark) {
         val navController = rememberNavController()
 
+        // Быстрое «перелистывание»: новый экран въезжает справа,
+        // при возврате — уезжает вправо (180 мс)
         NavHost(
             navController = navController,
             startDestination = "splash",
+            enterTransition = {
+                slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Left,
+                    animationSpec = tween(180),
+                )
+            },
+            exitTransition = {
+                slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Left,
+                    animationSpec = tween(180),
+                )
+            },
+            popEnterTransition = {
+                slideIntoContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Right,
+                    animationSpec = tween(180),
+                )
+            },
+            popExitTransition = {
+                slideOutOfContainer(
+                    AnimatedContentTransitionScope.SlideDirection.Right,
+                    animationSpec = tween(180),
+                )
+            },
         ) {
             composable("splash") {
                 SplashScreen(
@@ -69,23 +97,38 @@ private fun FallenApp() {
                         val route = if (projectId == null) "editor" else "editor?projectId=$projectId"
                         navController.navigate(route)
                     },
+                    onCreateProject = { w, h ->
+                        navController.navigate("editor?canvasW=$w&canvasH=$h")
+                    },
                     onOpenSettings = { navController.navigate("settings") },
                 )
             }
 
             composable(
-                route = "editor?projectId={projectId}",
+                route = "editor?projectId={projectId}&canvasW={canvasW}&canvasH={canvasH}",
                 arguments = listOf(
                     navArgument("projectId") {
                         type = NavType.StringType
                         nullable = true
                         defaultValue = null
                     },
+                    navArgument("canvasW") {
+                        type = NavType.IntType
+                        defaultValue = 1920
+                    },
+                    navArgument("canvasH") {
+                        type = NavType.IntType
+                        defaultValue = 1080
+                    },
                 ),
             ) { backStackEntry ->
                 val projectId = backStackEntry.arguments?.getString("projectId")
+                val canvasW = backStackEntry.arguments?.getInt("canvasW") ?: 1920
+                val canvasH = backStackEntry.arguments?.getInt("canvasH") ?: 1080
                 EditorScreen(
                     projectId = projectId,
+                    initialCanvasW = canvasW,
+                    initialCanvasH = canvasH,
                     isDarkTheme = isDark,
                     onBack = { navController.popBackStack() },
                 )

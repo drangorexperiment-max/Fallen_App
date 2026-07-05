@@ -63,11 +63,11 @@ private val LightFallenColors = FallenColors(
 val LocalFallenColors = staticCompositionLocalOf { DarkFallenColors }
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Violet500,
-    onPrimary = Color.White,
+    primary = Violet400,
+    onPrimary = Dark1,
     primaryContainer = Violet700,
     onPrimaryContainer = Color.White,
-    secondary = Violet400,
+    secondary = Violet500,
     onSecondary = Dark1,
     background = Dark1,
     onBackground = TextPrimaryDark,
@@ -82,11 +82,11 @@ private val DarkColorScheme = darkColorScheme(
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Violet600,
+    primary = Violet700,
     onPrimary = Color.White,
     primaryContainer = Violet300,
     onPrimaryContainer = Dark1,
-    secondary = Violet500,
+    secondary = Violet600,
     onSecondary = Color.White,
     background = Light0,
     onBackground = TextPrimaryLight,

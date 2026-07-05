@@ -56,12 +56,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.fallen.studio.ui.components.FallenLogoMark
 import com.fallen.studio.ui.screens.editor.panels.AssetsPanel
 import com.fallen.studio.ui.screens.editor.panels.ExportPanel
 import com.fallen.studio.ui.screens.editor.panels.LayersPanel
@@ -81,6 +81,8 @@ fun EditorScreen(
     projectId: String?,
     isDarkTheme: Boolean,
     onBack: () -> Unit,
+    initialCanvasW: Int = 1920,
+    initialCanvasH: Int = 1080,
     viewModel: EditorViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -100,7 +102,7 @@ fun EditorScreen(
     var showCanvasSizeDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(projectId) {
-        viewModel.loadProject(projectId)
+        viewModel.loadProject(projectId, initialCanvasW, initialCanvasH)
     }
 
     LaunchedEffect(state.toast) {
@@ -123,7 +125,6 @@ fun EditorScreen(
         ) {
             // ---------- Верхняя панель ----------
             EditorTopBar(
-                projectName = state.projectName,
                 canUndo = state.canUndo,
                 canRedo = state.canRedo,
                 isDirty = state.isDirty,
@@ -137,7 +138,12 @@ fun EditorScreen(
             )
 
             // ---------- Канвас ----------
-            Box(modifier = Modifier.weight(1f)) {
+            // clipToBounds не даёт увеличенному холсту перекрывать верхнее меню
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clipToBounds(),
+            ) {
                 EditorCanvas(
                     state = state,
                     settings = settings,
@@ -348,7 +354,6 @@ fun EditorScreen(
 
 @Composable
 private fun EditorTopBar(
-    projectName: String,
     canUndo: Boolean,
     canRedo: Boolean,
     isDirty: Boolean,
@@ -381,38 +386,31 @@ private fun EditorTopBar(
                     tint = colors.textSecondary,
                 )
             }
-            FallenLogoMark(size = 22.dp)
-            Spacer(Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = projectName,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    if (isDirty) {
-                        Spacer(Modifier.width(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary),
-                        )
-                    }
-                }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f),
+            ) {
                 Text(
                     text = canvasLabel,
-                    fontSize = 11.sp,
-                    color = colors.textSecondary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .clickable(onClick = onCanvasSize)
-                        .padding(vertical = 1.dp),
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
                 )
+                if (isDirty) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                    )
+                }
             }
             IconButton(onClick = onUndo, enabled = canUndo) {
                 Icon(

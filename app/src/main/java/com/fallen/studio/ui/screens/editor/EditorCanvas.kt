@@ -314,29 +314,33 @@ fun EditorCanvas(
                     )
                 }
 
-                // ---------- Квадратная сетка ----------
+                // ---------- Сетка ----------
+                // Шаг подстраивается под разрешение холста (ровно делит его),
+                // та же формула используется при привязке к сетке —
+                // границы элементов совпадают с линиями.
                 if (settings.gridEnabled) {
-                    val grid = settings.gridSize.coerceAtLeast(10).toFloat()
+                    val stepX = effectiveGridStep(state.canvas.w, settings.gridSize)
+                    val stepY = effectiveGridStep(state.canvas.h, settings.gridSize)
                     val gridStroke = 1f / viewScale
-                    var gx = grid
-                    while (gx < canvasW) {
+                    var gx = stepX
+                    while (gx < canvasW - 0.5f) {
                         drawLine(
                             color = colors.gridLine,
                             start = Offset(gx, 0f),
                             end = Offset(gx, canvasH),
                             strokeWidth = gridStroke,
                         )
-                        gx += grid
+                        gx += stepX
                     }
-                    var gy = grid
-                    while (gy < canvasH) {
+                    var gy = stepY
+                    while (gy < canvasH - 0.5f) {
                         drawLine(
                             color = colors.gridLine,
                             start = Offset(0f, gy),
                             end = Offset(canvasW, gy),
                             strokeWidth = gridStroke,
                         )
-                        gy += grid
+                        gy += stepY
                     }
                 }
 

@@ -26,6 +26,18 @@ import kotlinx.coroutines.launch
 /** Какая нижняя панель открыта */
 enum class EditorPanel { NONE, ASSETS, TEXT, LAYERS, PROPERTIES, EXPORT }
 
+/**
+ * Эффективный шаг сетки: подстраивается под разрешение холста так,
+ * чтобы линии РОВНО делили холст без остатка. Одна и та же формула
+ * используется и при отрисовке сетки, и при привязке к ней —
+ * поэтому границы элементов всегда совпадают с линиями.
+ */
+fun effectiveGridStep(canvasSide: Int, gridSize: Int): Float {
+    val base = gridSize.coerceAtLeast(10).toFloat()
+    val cells = Math.round(canvasSide / base).coerceAtLeast(1)
+    return canvasSide / cells.toFloat()
+}
+
 /** Состояние редактора */
 data class EditorState(
     val projectId: String? = null,
@@ -72,12 +84,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     // ---------- Загрузка / сохранение ----------
 
-    fun loadProject(id: String?) {
+    fun loadProject(id: String?, canvasW: Int = 0, canvasH: Int = 0) {
         viewModelScope.launch {
             if (id == null) {
                 val s = settings.value
                 _state.value = EditorState(
-                    canvas = CanvasSize(s.defaultCanvasW, s.defaultCanvasH),
+                    canvas = CanvasSize(
+                        if (canvasW > 0) canvasW else s.defaultCanvasW,
+                        if (canvasH > 0) canvasH else s.defaultCanvasH,
+                    ),
                 )
             } else {
                 val project = repository.load(id) ?: return@launch
@@ -139,14 +154,22 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * ИСПРАВЛЕНИЕ АВТОСОХРАНЕНИЯ: раньше автосейв писал проект в отдельный
+     * скрытый файл, который не показывался на главном экране. Теперь каждое
+     * изменение (с небольшой задержкой-дебаунсом) сохраняет проект как
+     * обычный — он сразу появляется в списке «Мои проекты».
+     */
     private fun startAutosave() {
         autosaveJob?.cancel()
         autosaveJob = viewModelScope.launch {
-            while (true) {
-                val interval = settings.value.autosaveIntervalSec.coerceAtLeast(10)
-                delay(interval * 1000L)
-                if (settings.value.autosaveEnabled && _state.value.isDirty) {
-                    repository.saveAutosave(currentProject())
+            _state.collect { s ->
+                if (settings.value.autosaveEnabled && s.isDirty) {
+                    delay(1500) // дебаунс: ждём паузу в действиях
+                    if (_state.value.isDirty && settings.value.autosaveEnabled) {
+                        val id = repository.save(currentProject())
+                        _state.value = _state.value.copy(projectId = id, isDirty = false)
+                    }
                 }
             }
         }
@@ -455,7 +478,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val cfg = settings.value
 
         // Магнитная привязка (как в оригинале): к центру/краям холста
-        // и к границам других элементов. Работает от сырой позиции,
+        // и к границам других элементов. Работает от сырой пози��ии,
         // поэтому элемент легко «отлипает» при дальнейшем движении.
         if (cfg.snapEnabled) {
             val snapped = applySnap(nx, ny, el.w, el.h, id, s)
@@ -463,11 +486,14 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             ny = snapped.second
         }
 
-        // Привязка к сетке: округление к ближайшему узлу (не усечение)
+        // Привязка к сетке: округление к ближайшему узлу (не усечение).
+        // Шаг по X и Y считается от реального разрешения холста —
+        // тот же шаг, по которому рисуется сетка на канвасе.
         if (cfg.snapToGrid) {
-            val grid = cfg.gridSize.coerceAtLeast(2)
-            nx = Math.round(nx / grid) * grid.toFloat()
-            ny = Math.round(ny / grid) * grid.toFloat()
+            val stepX = effectiveGridStep(s.canvas.w, cfg.gridSize)
+            val stepY = effectiveGridStep(s.canvas.h, cfg.gridSize)
+            nx = Math.round(nx / stepX) * stepX
+            ny = Math.round(ny / stepY) * stepY
         }
 
         _state.value = s.copy(
@@ -534,16 +560,81 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun resizeElement(id: String, newX: Float, newY: Float, newW: Float, newH: Float) {
+        var x = newX
+        var y = newY
+        var w = newW
+        var h = newH
+
+        // Привязка краёв рамки к сетке при ресайзе — границы элемента
+        // совпадают с линиями сетки холста
+        val cfg = settings.value
+        if (cfg.snapToGrid) {
+            val s = _state.value
+            val stepX = effectiveGridStep(s.canvas.w, cfg.gridSize)
+            val stepY = effectiveGridStep(s.canvas.h, cfg.gridSize)
+            val right = Math.round((x + w) / stepX) * stepX
+            val bottom = Math.round((y + h) / stepY) * stepY
+            x = Math.round(x / stepX) * stepX
+            y = Math.round(y / stepY) * stepY
+            w = right - x
+            h = bottom - y
+        }
+
         _state.value = _state.value.copy(
             elements = _state.value.elements.map { el ->
                 if (el.id == id && !el.locked) {
                     el.copy(
-                        x = newX,
-                        y = newY,
-                        w = newW.coerceAtLeast(10f),
-                        h = newH.coerceAtLeast(10f),
+                        x = x,
+                        y = y,
+                        w = w.coerceAtLeast(10f),
+                        h = h.coerceAtLeast(10f),
                     )
                 } else el
+            },
+            isDirty = true,
+        )
+    }
+
+    // Размеры и шрифт элемента на старте жеста масштабирования
+    private var scaleStartW = 0f
+    private var scaleStartH = 0f
+    private var scaleStartFontSize = 24
+
+    /** Вызывается в начале жеста за ручку масштабирования (правый нижний угол) */
+    fun beginScaleGesture() {
+        pushUndo()
+        val el = _state.value.selectedElement ?: return
+        gestureElementId = el.id
+        scaleStartW = el.w
+        scaleStartH = el.h
+        scaleStartFontSize = el.fontSize ?: 24
+    }
+
+    /**
+     * Пропорциональное масштабирование (ручка в правом нижнем углу):
+     * изображение и рамка растут с сохранением пропорций,
+     * у текста дополнительно масштабируется размер шрифта.
+     */
+    fun scaleElement(id: String, newW: Float) {
+        val s = _state.value
+        val el = s.elements.find { it.id == id } ?: return
+        if (el.locked || scaleStartW <= 0f) return
+        val factor = (newW / scaleStartW).coerceIn(0.05f, 50f)
+        val w = (scaleStartW * factor).coerceAtLeast(10f)
+        val h = (scaleStartH * factor).coerceAtLeast(10f)
+        _state.value = s.copy(
+            elements = s.elements.map {
+                if (it.id == id) {
+                    if (it.isText) {
+                        it.copy(
+                            w = w,
+                            h = h,
+                            fontSize = (scaleStartFontSize * factor).toInt().coerceIn(4, 2000),
+                        )
+                    } else {
+                        it.copy(w = w, h = h)
+                    }
+                } else it
             },
             isDirty = true,
         )

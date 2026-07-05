@@ -39,6 +39,9 @@ data class AppSettings(
     val hapticFeedback: Boolean = true,
     val showSizeTooltip: Boolean = true,
     val keepAspectDefault: Boolean = true,
+    /** Растягивание изображений при ресайзе рамки. Если выключено —
+     *  рамка растёт, а изображение вписывается по центру без искажений (как текст). */
+    val imageStretchEnabled: Boolean = true,
     // Экспорт
     val defaultExportFormat: String = "unity",
     val exportImageScale: Float = 1f,
@@ -67,6 +70,7 @@ class SettingsRepository(private val context: Context) {
         val hapticFeedback = booleanPreferencesKey("haptic_feedback")
         val showSizeTooltip = booleanPreferencesKey("show_size_tooltip")
         val keepAspectDefault = booleanPreferencesKey("keep_aspect_default")
+        val imageStretchEnabled = booleanPreferencesKey("image_stretch_enabled")
         val defaultExportFormat = stringPreferencesKey("default_export_format")
         val exportImageScale = floatPreferencesKey("export_image_scale")
         val includeComments = booleanPreferencesKey("include_comments")
@@ -95,6 +99,7 @@ class SettingsRepository(private val context: Context) {
             hapticFeedback = p[Keys.hapticFeedback] ?: true,
             showSizeTooltip = p[Keys.showSizeTooltip] ?: true,
             keepAspectDefault = p[Keys.keepAspectDefault] ?: true,
+            imageStretchEnabled = p[Keys.imageStretchEnabled] ?: true,
             defaultExportFormat = p[Keys.defaultExportFormat] ?: "unity",
             exportImageScale = p[Keys.exportImageScale] ?: 1f,
             includeComments = p[Keys.includeComments] ?: true,
@@ -157,6 +162,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setKeepAspectDefault(v: Boolean) =
         context.dataStore.edit { it[Keys.keepAspectDefault] = v }
+
+    suspend fun setImageStretchEnabled(v: Boolean) =
+        context.dataStore.edit { it[Keys.imageStretchEnabled] = v }
 
     suspend fun setDefaultExportFormat(v: String) =
         context.dataStore.edit { it[Keys.defaultExportFormat] = v }

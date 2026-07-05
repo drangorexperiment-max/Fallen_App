@@ -76,11 +76,13 @@ import com.fallen.studio.util.ImageUtils
 fun HomeScreen(
     onOpenProject: (String?) -> Unit,
     onOpenSettings: () -> Unit,
+    onCreateProject: (w: Int, h: Int) -> Unit = { _, _ -> onOpenProject(null) },
     viewModel: HomeViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsState()
     val colors = FallenTheme.colors
     val snackbarHostState = remember { SnackbarHostState() }
+    var newProjectOpen by remember { mutableStateOf(false) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
@@ -135,21 +137,15 @@ fun HomeScreen(
                     .padding(vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                FallenLogoMark(size = 34.dp, glowing = true)
+                FallenLogoMark(size = 40.dp, glowing = true)
                 Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Fallen",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = "Редактор расстановки UI",
-                        fontSize = 12.sp,
-                        color = colors.textSecondary,
-                    )
-                }
+                Text(
+                    text = "Fallen",
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
                 IconButton(onClick = onOpenSettings) {
                     Icon(
                         Icons.Outlined.Settings,
@@ -165,7 +161,7 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Button(
-                    onClick = { onOpenProject(null) },
+                    onClick = { newProjectOpen = true },
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
                         .weight(1f)
@@ -245,6 +241,152 @@ fun HomeScreen(
             }
         }
     }
+
+    if (newProjectOpen) {
+        NewProjectDialog(
+            onDismiss = { newProjectOpen = false },
+            onCreate = { w, h ->
+                newProjectOpen = false
+                onCreateProject(w, h)
+            },
+        )
+    }
+}
+
+// ==================================================================
+// Диалог создания проекта: выбор разрешения холста
+// ==================================================================
+
+private val canvasPresets = listOf(
+    Triple("Full HD", 1920, 1080),
+    Triple("Full HD верт.", 1080, 1920),
+    Triple("2K QHD", 2560, 1440),
+    Triple("HD", 1280, 720),
+    Triple("Квадрат", 1080, 1080),
+    Triple("4K UHD", 3840, 2160),
+)
+
+@Composable
+private fun NewProjectDialog(
+    onDismiss: () -> Unit,
+    onCreate: (w: Int, h: Int) -> Unit,
+) {
+    val colors = FallenTheme.colors
+    var selectedPreset by remember { mutableStateOf(0) }
+    var customMode by remember { mutableStateOf(false) }
+    var customW by remember { mutableStateOf("1920") }
+    var customH by remember { mutableStateOf("1080") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Новый проект") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Разрешение холста",
+                    fontSize = 13.sp,
+                    color = colors.textSecondary,
+                )
+                canvasPresets.forEachIndexed { index, (name, w, h) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (!customMode && selectedPreset == index)
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                else colors.surfaceElevated,
+                            )
+                            .border(
+                                1.dp,
+                                if (!customMode && selectedPreset == index)
+                                    MaterialTheme.colorScheme.primary
+                                else colors.divider,
+                                RoundedCornerShape(10.dp),
+                            )
+                            .clickable {
+                                customMode = false
+                                selectedPreset = index
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = name,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = "$w × $h",
+                            fontSize = 13.sp,
+                            color = colors.textSecondary,
+                        )
+                    }
+                }
+                // Своё разрешение
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (customMode)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                            else colors.surfaceElevated,
+                        )
+                        .border(
+                            1.dp,
+                            if (customMode) MaterialTheme.colorScheme.primary else colors.divider,
+                            RoundedCornerShape(10.dp),
+                        )
+                        .clickable { customMode = true }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = "Своё разрешение",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                if (customMode) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = customW,
+                            onValueChange = { customW = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("Ширина") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedTextField(
+                            value = customH,
+                            onValueChange = { customH = it.filter { c -> c.isDigit() }.take(5) },
+                            label = { Text("Высота") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (customMode) {
+                    val w = customW.toIntOrNull()?.coerceIn(100, 10000) ?: 1920
+                    val h = customH.toIntOrNull()?.coerceIn(100, 10000) ?: 1080
+                    onCreate(w, h)
+                } else {
+                    val (_, w, h) = canvasPresets[selectedPreset]
+                    onCreate(w, h)
+                }
+            }) { Text("Создать") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
 }
 
 // ==================================================================
