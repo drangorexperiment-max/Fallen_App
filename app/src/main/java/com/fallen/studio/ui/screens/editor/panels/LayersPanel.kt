@@ -55,7 +55,11 @@ fun LayersPanel(
     onDuplicate: (String) -> Unit,
     onMoveLayer: (String, Boolean) -> Unit,
     onDelete: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRename: (String, String) -> Unit = { _, _ -> },
+    onToggleDimensions: (String) -> Unit = {},
+    /** Глобальная настройка «Размерные метки» включена? */
+    dimensionMarksEnabled: Boolean = true,
 ) {
     // Верхний слой (максимальный z) показываем первым
     val ordered = elements.sortedByDescending { it.z }
@@ -122,7 +126,10 @@ fun LayersPanel(
                         onDuplicate = { onDuplicate(element.id) },
                         onMoveUp = { onMoveLayer(element.id, true) },
                         onMoveDown = { onMoveLayer(element.id, false) },
-                        onDelete = { onDelete(element.id) }
+                        onDelete = { onDelete(element.id) },
+                        onRename = { newName -> onRename(element.id, newName) },
+                        onToggleDimensions = { onToggleDimensions(element.id) },
+                        dimensionMarksEnabled = dimensionMarksEnabled,
                     )
                 }
             }
@@ -140,8 +147,14 @@ private fun LayerRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onDelete: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRename: (String) -> Unit = {},
+    onToggleDimensions: () -> Unit = {},
+    dimensionMarksEnabled: Boolean = true,
 ) {
+    // Режим редактирования названия слоя
+    var editing by remember(element.id) { mutableStateOf(false) }
+    var nameInput by remember(element.id, element.name) { mutableStateOf(element.name) }
     val shape = RoundedCornerShape(14.dp)
     val borderColor = if (isSelected) {
         MaterialTheme.colorScheme.primary
@@ -198,17 +211,46 @@ private fun LayerRow(
                 }
             }
 
-            // Название, тип и размеры
+            // Название (тап по карандашу — переименовать), тип и размеры
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = element.name.ifBlank {
-                        if (element.isText) (element.text ?: "Текст").take(20) else "Слой"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (editing) {
+                    BasicTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it.take(40) },
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        singleLine = true,
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardActions = KeyboardActions(onDone = {
+                            if (nameInput.isNotBlank()) onRename(nameInput)
+                            editing = false
+                        }),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.surface,
+                                RoundedCornerShape(6.dp),
+                            )
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                RoundedCornerShape(6.dp),
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                } else {
+                    Text(
+                        text = element.name.ifBlank {
+                            if (element.isText) (element.text ?: "Текст").take(20) else "Слой"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -241,6 +283,41 @@ private fun LayerRow(
                 .padding(top = 6.dp),
             horizontalArrangement = Arrangement.End
         ) {
+            // Переименование слоя
+            IconButton(
+                onClick = {
+                    if (editing && nameInput.isNotBlank()) onRename(nameInput)
+                    editing = !editing
+                },
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    imageVector = if (editing) Icons.Outlined.Check else Icons.Outlined.Edit,
+                    contentDescription = if (editing) "Сохранить название" else "Переименовать",
+                    tint = if (editing) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            // Размерные метки этого элемента (только при включённой настройке)
+            IconButton(
+                onClick = onToggleDimensions,
+                enabled = dimensionMarksEnabled,
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Straighten,
+                    contentDescription = if (element.showDimensions)
+                        "Скрыть размерные метки" else "Показать размерные метки",
+                    tint = when {
+                        !dimensionMarksEnabled ->
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                        element.showDimensions -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.size(18.dp)
+                )
+            }
             IconButton(onClick = onDuplicate, modifier = Modifier.size(34.dp)) {
                 Icon(
                     imageVector = Icons.Outlined.ContentCopy,

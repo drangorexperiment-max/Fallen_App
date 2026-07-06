@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Colorize
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,9 +21,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.fallen.studio.util.ColorUtils
 
 private val PresetColors = listOf(
@@ -178,6 +185,74 @@ fun FallenColorPicker(
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(12.dp)
             )
+        }
+    }
+
+    // ---------- Диалог пипетки ----------
+    // Показывает снимок холста; тап по любой точке выбирает её цвет
+    if (eyedropperOpen && eyedropperBitmap != null) {
+        val bitmap = remember(eyedropperOpen) { eyedropperBitmap() }
+        Dialog(onDismissRequest = { eyedropperOpen = false }) {
+            Column(
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "Пипетка: коснитесь нужного цвета",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (bitmap != null) {
+                    var imgSize by remember { mutableStateOf(IntSize(1, 1)) }
+                    androidx.compose.foundation.Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Снимок холста для выбора цвета",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onSizeChanged { imgSize = it }
+                            .pointerInput(bitmap) {
+                                detectTapGestures { pos ->
+                                    // Пересчёт координат тапа в пиксели bitmap
+                                    // с учётом letterbox от ContentScale.Fit
+                                    val scale = minOf(
+                                        imgSize.width.toFloat() / bitmap.width,
+                                        imgSize.height.toFloat() / bitmap.height,
+                                    )
+                                    val drawnW = bitmap.width * scale
+                                    val drawnH = bitmap.height * scale
+                                    val offX = (imgSize.width - drawnW) / 2f
+                                    val offY = (imgSize.height - drawnH) / 2f
+                                    val bx = ((pos.x - offX) / scale).toInt()
+                                    val by = ((pos.y - offY) / scale).toInt()
+                                    if (bx in 0 until bitmap.width && by in 0 until bitmap.height) {
+                                        val px = bitmap.getPixel(bx, by)
+                                        val hex = String.format(
+                                            "#%02X%02X%02X",
+                                            android.graphics.Color.red(px),
+                                            android.graphics.Color.green(px),
+                                            android.graphics.Color.blue(px),
+                                        )
+                                        onColorSelected(hex)
+                                        eyedropperOpen = false
+                                    }
+                                }
+                            },
+                    )
+                } else {
+                    Text(
+                        text = "Не удалось получить снимок холста",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                TextButton(
+                    onClick = { eyedropperOpen = false },
+                    modifier = Modifier.align(Alignment.End),
+                ) { Text("Отмена") }
+            }
         }
     }
 }

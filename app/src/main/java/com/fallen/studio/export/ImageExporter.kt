@@ -26,6 +26,8 @@ object ImageExporter {
         scale: Float = 1f,
         transparentBackground: Boolean = true,
         context: Context? = null,
+        /** Рисовать размерные метки (стрелки с разрешением сторон) внутри холста */
+        dimensionLabels: Boolean = false,
     ): Bitmap? {
         val w = (project.canvas.w * scale).toInt().coerceIn(1, 8192)
         val h = (project.canvas.h * scale).toInt().coerceIn(1, 8192)
@@ -71,7 +73,68 @@ object ImageExporter {
             }
             canvas.restore()
         }
+
+        // ---------- Размерные метки при экспорте ----------
+        // Все метки рисуются ВНУТРИ холста, чтобы не обрезались:
+        // холст — вдоль нижней/правой границы, элементы — у своих границ
+        if (dimensionLabels) {
+            drawDimensionLabels(canvas, project)
+        }
         return bitmap
+    }
+
+    /** Стрелки с разрешением сторон: ширина у нижней границы, высота у правой */
+    private fun drawDimensionLabels(canvas: Canvas, project: FallenProject) {
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.argb(200, 255, 255, 255)
+            strokeWidth = 2f
+        }
+        val shadowLine = Paint(line).apply {
+            color = android.graphics.Color.argb(140, 0, 0, 0)
+            strokeWidth = 4f
+        }
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            textSize = 28f
+            textAlign = Paint.Align.CENTER
+            setShadowLayer(4f, 0f, 0f, android.graphics.Color.BLACK)
+        }
+
+        fun marks(x: Float, y: Float, w: Float, h: Float, inset: Float) {
+            val arrow = 10f
+            // Горизонтальная (ширина) — внутри, у нижней границы
+            val hy = y + h - inset
+            for (p in listOf(shadowLine, line)) {
+                canvas.drawLine(x + inset, hy, x + w - inset, hy, p)
+                canvas.drawLine(x + inset, hy, x + inset + arrow, hy - arrow * 0.6f, p)
+                canvas.drawLine(x + inset, hy, x + inset + arrow, hy + arrow * 0.6f, p)
+                canvas.drawLine(x + w - inset, hy, x + w - inset - arrow, hy - arrow * 0.6f, p)
+                canvas.drawLine(x + w - inset, hy, x + w - inset - arrow, hy + arrow * 0.6f, p)
+            }
+            canvas.drawText(w.toInt().toString(), x + w / 2f, hy - 10f, text)
+            // Вертикальная (высота) — внутри, у правой границы
+            val vx = x + w - inset
+            for (p in listOf(shadowLine, line)) {
+                canvas.drawLine(vx, y + inset, vx, y + h - inset, p)
+                canvas.drawLine(vx, y + inset, vx - arrow * 0.6f, y + inset + arrow, p)
+                canvas.drawLine(vx, y + inset, vx + arrow * 0.6f, y + inset + arrow, p)
+                canvas.drawLine(vx, y + h - inset, vx - arrow * 0.6f, y + h - inset - arrow, p)
+                canvas.drawLine(vx, y + h - inset, vx + arrow * 0.6f, y + h - inset - arrow, p)
+            }
+            canvas.save()
+            canvas.rotate(-90f, vx - 10f, y + h / 2f)
+            canvas.drawText(h.toInt().toString(), vx - 10f, y + h / 2f, text)
+            canvas.restore()
+        }
+
+        // Холст целиком
+        marks(0f, 0f, project.canvas.w, project.canvas.h, inset = 24f)
+        // Элементы с включёнными метками
+        project.elements.forEach { el ->
+            if (el.showDimensions) {
+                marks(el.x, el.y, el.w, el.h, inset = 6f)
+            }
+        }
     }
 
     /** Сохраняет Bitmap в поток как PNG. */
@@ -86,8 +149,9 @@ object ImageExporter {
         uri: Uri,
         scale: Float,
         transparentBackground: Boolean,
+        dimensionLabels: Boolean = false,
     ): Boolean {
-        val bitmap = render(project, scale, transparentBackground, context) ?: return false
+        val bitmap = render(project, scale, transparentBackground, context, dimensionLabels) ?: return false
         return try {
             context.contentResolver.openOutputStream(uri)?.use { out ->
                 writePng(bitmap, out)

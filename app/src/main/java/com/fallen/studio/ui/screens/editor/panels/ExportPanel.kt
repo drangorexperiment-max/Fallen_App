@@ -82,6 +82,7 @@ fun ExportPanel(
     var showPreview by remember { mutableStateOf(false) }
     var imageScale by remember { mutableStateOf(1f) }
     var transparentBg by remember { mutableStateOf(true) }
+    var dimensionLabels by remember { mutableStateOf(false) }
 
     val generatedCode = remember(project, format, includeComments) {
         ExportEngine.generate(project, format, includeComments)
@@ -106,7 +107,7 @@ fun ExportPanel(
         ActivityResultContracts.CreateDocument("image/png")
     ) { uri ->
         if (uri != null) {
-            val ok = ImageExporter.exportToUri(context, project, uri, imageScale, transparentBg)
+            val ok = ImageExporter.exportToUri(context, project, uri, imageScale, transparentBg, dimensionLabels)
             onToast(if (ok) "PNG сохранён" else "Ошибка экспорта PNG")
         }
     }
@@ -374,6 +375,12 @@ fun ExportPanel(
             label = "Прозрачный фон",
             checked = transparentBg,
             onCheckedChange = { transparentBg = it }
+        )
+        SwitchRow(
+            label = "Размерные метки",
+            description = "Стрелки с разрешением сторон холста и элементов внутри изображения",
+            checked = dimensionLabels,
+            onCheckedChange = { dimensionLabels = it }
         )
         Button(
             onClick = {
