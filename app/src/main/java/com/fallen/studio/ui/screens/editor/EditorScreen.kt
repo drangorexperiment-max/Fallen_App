@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Redo
 import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.CenterFocusWeak
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Image
@@ -98,6 +99,8 @@ fun EditorScreen(
         uri?.let { viewModel.addFontFromUri(it) }
     }
     var viewScale by remember { mutableFloatStateOf(0.15f) }
+    // Счётчик нажатий кнопки «по центру» — триггер повторного центрирования
+    var recenterTrigger by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var showClearDialog by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showCanvasSizeDialog by remember { mutableStateOf(false) }
@@ -163,26 +166,51 @@ fun EditorScreen(
                     onResize = viewModel::resizeElement,
                     onBeginScaleGesture = viewModel::beginScaleGesture,
                     onScale = viewModel::scaleElement,
+                    onBeginRotateGesture = viewModel::beginRotateGesture,
+                    onRotate = { id, delta -> viewModel.rotateElement(id, delta) },
                     onViewTransform = { viewScale = it },
+                    recenterTrigger = recenterTrigger,
                     modifier = Modifier.fillMaxSize(),
                 )
 
-                // Индикатор масштаба
-                Box(
+                // Индикатор масштаба + кнопка «вернуть холст по центру»
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(12.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(colors.surfaceElevated.copy(alpha = 0.9f))
-                        .border(1.dp, colors.divider, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                        .padding(12.dp),
                 ) {
-                    Text(
-                        text = "${(viewScale * 100).roundToInt()}%",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.textSecondary,
-                    )
+                    // Кнопка центрирования вида
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.surfaceElevated.copy(alpha = 0.9f))
+                            .border(1.dp, colors.divider, RoundedCornerShape(10.dp))
+                            .clickable { recenterTrigger++ }
+                            .padding(6.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CenterFocusWeak,
+                            contentDescription = "Вернуть холст по центру",
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.surfaceElevated.copy(alpha = 0.9f))
+                            .border(1.dp, colors.divider, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            text = "${(viewScale * 100).roundToInt()}%",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.textSecondary,
+                        )
+                    }
                 }
             }
 

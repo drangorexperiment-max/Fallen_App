@@ -45,6 +45,10 @@ data class AppSettings(
     val defaultExportFormat: String = "unity",
     val exportImageScale: Float = 1f,
     val includeComments: Boolean = true,
+    /** Рисовать размерные метки внутри холста при сохранении как изображение */
+    val exportDimensionLabels: Boolean = false,
+    /** 8 пользовательских ячеек палитры (hex или пустая строка) */
+    val customColors: List<String> = List(8) { "" },
 )
 
 class SettingsRepository(private val context: Context) {
@@ -72,6 +76,8 @@ class SettingsRepository(private val context: Context) {
         val defaultExportFormat = stringPreferencesKey("default_export_format")
         val exportImageScale = floatPreferencesKey("export_image_scale")
         val includeComments = booleanPreferencesKey("include_comments")
+        val exportDimensionLabels = booleanPreferencesKey("export_dimension_labels")
+        val customColors = stringPreferencesKey("custom_colors")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -100,6 +106,10 @@ class SettingsRepository(private val context: Context) {
             defaultExportFormat = p[Keys.defaultExportFormat] ?: "unity",
             exportImageScale = p[Keys.exportImageScale] ?: 1f,
             includeComments = p[Keys.includeComments] ?: true,
+            exportDimensionLabels = p[Keys.exportDimensionLabels] ?: false,
+            customColors = (p[Keys.customColors] ?: "")
+                .split("|")
+                .let { list -> List(8) { i -> list.getOrNull(i) ?: "" } },
         )
     }
 
@@ -168,4 +178,17 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setIncludeComments(v: Boolean) =
         context.dataStore.edit { it[Keys.includeComments] = v }
+
+    suspend fun setExportDimensionLabels(v: Boolean) =
+        context.dataStore.edit { it[Keys.exportDimensionLabels] = v }
+
+    /** Сохраняет цвет в одну из 8 пользовательских ячеек палитры */
+    suspend fun setCustomColor(index: Int, hex: String) =
+        context.dataStore.edit { p ->
+            val current = (p[Keys.customColors] ?: "")
+                .split("|")
+                .let { list -> MutableList(8) { i -> list.getOrNull(i) ?: "" } }
+            if (index in 0..7) current[index] = hex
+            p[Keys.customColors] = current.joinToString("|")
+        }
 }

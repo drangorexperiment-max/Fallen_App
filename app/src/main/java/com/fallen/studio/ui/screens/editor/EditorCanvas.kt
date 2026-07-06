@@ -40,14 +40,18 @@ import com.fallen.studio.ui.theme.FallenColors
 import com.fallen.studio.util.ImageUtils
 import kotlin.math.abs
 
-/** Ручки ресайза. SCALE — пропорциональное масштабирование (правый нижний угол, снаружи) */
-private enum class Handle { NW, N, NE, W, E, SW, S, SE, SCALE }
+/**
+ * Ручки ресайза. SCALE — пропорциональное масштабирование (правый нижний
+ * угол, снаружи). ROTATE — поворот (правый верхний угол, снаружи,
+ * вместо обычной точки NE).
+ */
+private enum class Handle { NW, N, W, E, SW, S, SE, SCALE, ROTATE }
 
 /** Смещение ручки масштабирования от правого нижнего угла (в px канваса при scale=1) */
 private const val SCALE_HANDLE_OFFSET = 34f
 
 /** Режим текущего жеста */
-private enum class GestureMode { NONE, DRAG, RESIZE, PAN, PAN_ZOOM }
+private enum class GestureMode { NONE, DRAG, RESIZE, ROTATE, PAN, PAN_ZOOM }
 
 /**
  * Канвас редактора Fallen:
@@ -71,6 +75,10 @@ fun EditorCanvas(
     onViewTransform: (scale: Float) -> Unit = {},
     onBeginScaleGesture: () -> Unit = {},
     onScale: (String, Float) -> Unit = { _, _ -> },
+    onBeginRotateGesture: () -> Unit = {},
+    onRotate: (String, Float) -> Unit = { _, _ -> },
+    /** Увеличение счётчика снаружи -> холст заново центрируется */
+    recenterTrigger: Int = 0,
 ) {
     var viewScale by remember { mutableFloatStateOf(0.15f) }
     var viewOffset by remember { mutableStateOf(Offset.Zero) }
@@ -93,6 +101,11 @@ fun EditorCanvas(
     val currentOnViewTransform by rememberUpdatedState(onViewTransform)
     val currentOnBeginScaleGesture by rememberUpdatedState(onBeginScaleGesture)
     val currentOnScale by rememberUpdatedState(onScale)
+    val currentOnBeginRotateGesture by rememberUpdatedState(onBeginRotateGesture)
+    val currentOnRotate by rememberUpdatedState(onRotate)
+
+    // Подсказка размеров: показывается во время ресайза/масштабирования
+    var resizeInProgress by remember { mutableStateOf(false) }
 
     // Кэш декодированных Bitmap по src (LRU-подобный, простой)
     val bitmapCache = remember { mutableMapOf<String, Bitmap?>() }
@@ -125,6 +138,14 @@ fun EditorCanvas(
         if (!userMoved) fitToScreen()
     }
 
+    // Кнопка «по центру»: внешний счётчик увеличился — возвращаем вид
+    LaunchedEffect(recenterTrigger) {
+        if (recenterTrigger > 0) {
+            userMoved = false
+            fitToScreen()
+        }
+    }
+
     fun screenToCanvas(p: Offset): Offset =
         Offset((p.x - viewOffset.x) / viewScale, (p.y - viewOffset.y) / viewScale)
 
@@ -143,7 +164,7 @@ fun EditorCanvas(
         val r = 24f / viewScale // радиус захвата ручки в координатах канваса
 
         // Ручка пропорционального масштабирования — правый нижний угол,
-        // чуть снаружи рамки. Проверяется первой (приоритет над SE).
+        // чуть снаружи рамки. Провер��ется первой (приоритет над SE).
         val scalePos = Offset(
             el.x + el.w + SCALE_HANDLE_OFFSET / viewScale,
             el.y + el.h + SCALE_HANDLE_OFFSET / viewScale,
@@ -152,10 +173,19 @@ fun EditorCanvas(
             return Handle.SCALE
         }
 
+        // Ручка поворота — правый верхний угол, снаружи рамки
+        // (вместо обычной точки NE)
+        val rotatePos = Offset(
+            el.x + el.w + SCALE_HANDLE_OFFSET / viewScale,
+            el.y - SCALE_HANDLE_OFFSET / viewScale,
+        )
+        if (abs(canvasPoint.x - rotatePos.x) < r && abs(canvasPoint.y - rotatePos.y) < r) {
+            return Handle.ROTATE
+        }
+
         val handles = mapOf(
             Handle.NW to Offset(el.x, el.y),
             Handle.N to Offset(el.x + el.w / 2, el.y),
-            Handle.NE to Offset(el.x + el.w, el.y),
             Handle.W to Offset(el.x, el.y + el.h / 2),
             Handle.E to Offset(el.x + el.w, el.y + el.h / 2),
             Handle.SW to Offset(el.x, el.y + el.h),
@@ -195,6 +225,7 @@ fun EditorCanvas(
                                     // Это был тап — выделение
                                     currentOnSelect(elementHit?.id)
                                 }
+                                resizeInProgress = false
                                 break
                             }
 
@@ -238,9 +269,40 @@ fun EditorCanvas(
                             val canvasDelta = Offset(delta.x / viewScale, delta.y / viewScale)
 
                             when {
+                                // Поворот кругляшком в правом верхнем углу:
+                                // угол считается от центра элемента
+                                mode == GestureMode.ROTATE ||
+                                    (mode == GestureMode.NONE && handleHit == Handle.ROTATE) -> {
+                                    mode = GestureMode.ROTATE
+                                    val el = currentState.selectedElement
+                                    if (el != null && !el.locked) {
+                                        if (!gestureStarted) {
+                                            gestureStarted = true
+                                            currentOnBeginRotateGesture()
+                                        }
+                                        val center = Offset(el.x + el.w / 2f, el.y + el.h / 2f)
+                                        val startA = Math.toDegrees(
+                                            kotlin.math.atan2(
+                                                (startCanvasPoint.y - center.y).toDouble(),
+                                                (startCanvasPoint.x - center.x).toDouble(),
+                                            )
+                                        ).toFloat()
+                                        val cur = screenToCanvas(change.position)
+                                        val curA = Math.toDegrees(
+                                            kotlin.math.atan2(
+                                                (cur.y - center.y).toDouble(),
+                                                (cur.x - center.x).toDouble(),
+                                            )
+                                        ).toFloat()
+                                        currentOnRotate(el.id, curA - startA)
+                                    }
+                                    change.consume()
+                                }
+
                                 mode == GestureMode.RESIZE ||
                                     (mode == GestureMode.NONE && handleHit != null) -> {
                                     mode = GestureMode.RESIZE
+                                    resizeInProgress = true
                                     activeHandle = activeHandle ?: handleHit
                                     val el = currentState.selectedElement
                                     if (el != null && !el.locked && activeHandle == Handle.SCALE) {
@@ -271,13 +333,12 @@ fun EditorCanvas(
                                         when (activeHandle) {
                                             Handle.NW -> { left = current.x; top = current.y }
                                             Handle.N -> top = current.y
-                                            Handle.NE -> { right = current.x; top = current.y }
                                             Handle.W -> left = current.x
                                             Handle.E -> right = current.x
                                             Handle.SW -> { left = current.x; bottom = current.y }
                                             Handle.S -> bottom = current.y
                                             Handle.SE -> { right = current.x; bottom = current.y }
-                                            Handle.SCALE, null -> {}
+                                            Handle.SCALE, Handle.ROTATE, null -> {}
                                         }
                                         if (right - left >= 10f && bottom - top >= 10f) {
                                             currentOnResize(el.id, left, top, right - left, bottom - top)
@@ -389,7 +450,16 @@ fun EditorCanvas(
                 }
 
                 // ---------- Элементы (по z-порядку) ----------
+                // Поворот применяется вокруг центра элемента
                 state.elements.sortedBy { it.z }.forEach { el ->
+                    withTransform({
+                        if (el.rotation != 0f) {
+                            rotate(
+                                degrees = el.rotation,
+                                pivot = Offset(el.x + el.w / 2f, el.y + el.h / 2f),
+                            )
+                        }
+                    }) {
                     val alpha = (el.opacity / 100f).coerceIn(0f, 1f)
                     if (el.isImage) {
                         val bmp = bitmapFor(el.src)
@@ -423,6 +493,20 @@ fun EditorCanvas(
                             TextElementRenderer.draw(it.nativeCanvas, el, state.fonts, context)
                         }
                     }
+                    } // конец withTransform (поворот элемента)
+                }
+
+                // ---------- Затемнение области вне холста ----------
+                // Рисуется ПОВЕРХ элементов: части элементов, выходящие
+                // за пределы рабочего поля, приглушаются
+                if (settings.canvasDimOutside) {
+                    val dimColor = Color.Black.copy(alpha = if (isDarkTheme) 0.55f else 0.35f)
+                    val big = 100000f
+                    // Слева, справа, сверху, снизу от холста
+                    drawRect(dimColor, topLeft = Offset(-big, -big), size = Size(big, big * 2))
+                    drawRect(dimColor, topLeft = Offset(canvasW, -big), size = Size(big, big * 2))
+                    drawRect(dimColor, topLeft = Offset(0f, -big), size = Size(canvasW, big))
+                    drawRect(dimColor, topLeft = Offset(0f, canvasH), size = Size(canvasW, big))
                 }
 
                 // ---------- Рамка выделения и ручки ----------
@@ -435,10 +519,10 @@ fun EditorCanvas(
                         style = Stroke(width = selStroke),
                     )
                     val handleR = 7f / viewScale
+                    // Точки ресайза (правый верхний угол занят ручкой поворота)
                     listOf(
                         Offset(el.x, el.y),
                         Offset(el.x + el.w / 2, el.y),
-                        Offset(el.x + el.w, el.y),
                         Offset(el.x, el.y + el.h / 2),
                         Offset(el.x + el.w, el.y + el.h / 2),
                         Offset(el.x, el.y + el.h),
@@ -500,6 +584,75 @@ fun EditorCanvas(
                         end = Offset(scaleCenter.x, scaleCenter.y + a),
                         strokeWidth = 2f / viewScale,
                     )
+
+                    // Ручка поворота (правый верхний угол, снаружи):
+                    // залитый кружок с дугой-стрелкой внутри
+                    val rotateCenter = Offset(
+                        el.x + el.w + SCALE_HANDLE_OFFSET / viewScale,
+                        el.y - SCALE_HANDLE_OFFSET / viewScale,
+                    )
+                    drawLine(
+                        color = colors.selection.copy(alpha = 0.55f),
+                        start = Offset(el.x + el.w, el.y),
+                        end = Offset(
+                            rotateCenter.x - scaleR * 0.7f,
+                            rotateCenter.y + scaleR * 0.7f,
+                        ),
+                        strokeWidth = 1.5f / viewScale,
+                    )
+                    drawCircle(color = colors.selection, radius = scaleR, center = rotateCenter)
+                    drawCircle(
+                        color = Color.White,
+                        radius = scaleR,
+                        center = rotateCenter,
+                        style = Stroke(width = 1.5f / viewScale),
+                    )
+                    // Дуга со стрелкой — символ поворота
+                    val arcR = scaleR * 0.55f
+                    drawArc(
+                        color = Color.White,
+                        startAngle = -40f,
+                        sweepAngle = 260f,
+                        useCenter = false,
+                        topLeft = Offset(rotateCenter.x - arcR, rotateCenter.y - arcR),
+                        size = Size(arcR * 2f, arcR * 2f),
+                        style = Stroke(width = 2f / viewScale),
+                    )
+                    // Наконечник стрелки на конце дуги
+                    val tipA = Math.toRadians(-40.0)
+                    val tip = Offset(
+                        rotateCenter.x + arcR * kotlin.math.cos(tipA).toFloat(),
+                        rotateCenter.y + arcR * kotlin.math.sin(tipA).toFloat(),
+                    )
+                    drawCircle(color = Color.White, radius = 2.2f / viewScale, center = tip)
+
+                    // ---------- Подсказка размеров при ресайзе ----------
+                    if (settings.showSizeTooltip && resizeInProgress) {
+                        drawIntoCanvas { c ->
+                            val label = "${el.w.toInt()} \u00d7 ${el.h.toInt()}"
+                            val textPx = 13f / viewScale * 3f
+                            val paint = android.graphics.Paint().apply {
+                                color = android.graphics.Color.WHITE
+                                textSize = textPx
+                                isAntiAlias = true
+                                textAlign = android.graphics.Paint.Align.CENTER
+                                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                            }
+                            val bg = android.graphics.Paint().apply {
+                                color = android.graphics.Color.argb(200, 20, 20, 30)
+                                isAntiAlias = true
+                            }
+                            val cx = el.x + el.w / 2f
+                            val cy = el.y - 26f / viewScale
+                            val halfW = paint.measureText(label) / 2f + textPx * 0.5f
+                            c.nativeCanvas.drawRoundRect(
+                                cx - halfW, cy - textPx * 1.1f,
+                                cx + halfW, cy + textPx * 0.45f,
+                                textPx * 0.4f, textPx * 0.4f, bg,
+                            )
+                            c.nativeCanvas.drawText(label, cx, cy, paint)
+                        }
+                    }
                 }
 
                 // ---------- Рамка рабочего поля ----------
@@ -509,8 +662,101 @@ fun EditorCanvas(
                     size = Size(canvasW, canvasH),
                     style = Stroke(width = 2f / viewScale),
                 )
+
+                // ---------- Размерные метки (настройка «Размерные метки») ----------
+                // Стрелки с разрешением сторон: нижняя граница — ширина,
+                // правая граница — высота. У холста и у каждого элемента,
+                // если у элемента не отключено в Слоях/Свойствах.
+                if (settings.showRulers) {
+                    val labelColor = if (isDarkTheme) {
+                        android.graphics.Color.argb(230, 235, 235, 245)
+                    } else {
+                        android.graphics.Color.argb(230, 30, 30, 45)
+                    }
+                    // Холст: метки внутри рабочего поля
+                    drawDimensionMarks(
+                        x = 0f, y = 0f, w = canvasW, h = canvasH,
+                        viewScale = viewScale, textColor = labelColor,
+                        inside = true,
+                    )
+                    // Элементы: метки чуть снаружи рамки
+                    state.elements.forEach { el ->
+                        if (el.showDimensions) {
+                            drawDimensionMarks(
+                                x = el.x, y = el.y, w = el.w, h = el.h,
+                                viewScale = viewScale, textColor = labelColor,
+                                inside = false,
+                            )
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+/**
+ * Размерные метки: тонкая линия со стрелочками на концах + подпись
+ * разрешения. Горизонтальная — вдоль нижней границы (ширина),
+ * вертикальная — вдоль правой границы (высота).
+ * inside=true — метки внутри прямоугольника (для холста),
+ * inside=false — чуть снаружи (для элементов).
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDimensionMarks(
+    x: Float,
+    y: Float,
+    w: Float,
+    h: Float,
+    viewScale: Float,
+    textColor: Int,
+    inside: Boolean,
+) {
+    val stroke = 1.2f / viewScale
+    val arrow = 6f / viewScale
+    val gap = (if (inside) -14f else 12f) / viewScale
+    val textPx = 30f / viewScale
+    val lineColor = Color(textColor).copy(alpha = 0.75f)
+
+    drawIntoCanvas { c ->
+        val paint = android.graphics.Paint().apply {
+            color = textColor
+            textSize = textPx
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+
+        // --- Горизонтальная метка (ширина), нижняя граница ---
+        val hy = y + h + gap
+        drawLine(lineColor, Offset(x, hy), Offset(x + w, hy), strokeWidth = stroke)
+        // Стрелочки на концах
+        drawLine(lineColor, Offset(x, hy), Offset(x + arrow, hy - arrow * 0.6f), strokeWidth = stroke)
+        drawLine(lineColor, Offset(x, hy), Offset(x + arrow, hy + arrow * 0.6f), strokeWidth = stroke)
+        drawLine(lineColor, Offset(x + w, hy), Offset(x + w - arrow, hy - arrow * 0.6f), strokeWidth = stroke)
+        drawLine(lineColor, Offset(x + w, hy), Offset(x + w - arrow, hy + arrow * 0.6f), strokeWidth = stroke)
+        c.nativeCanvas.drawText(
+            w.toInt().toString(),
+            x + w / 2f,
+            hy - textPx * 0.35f,
+            paint,
+        )
+
+        // --- Вертикальная метка (высота), правая граница ---
+        val vx = x + w + gap
+        drawLine(lineColor, Offset(vx, y), Offset(vx, y + h), strokeWidth = stroke)
+        drawLine(lineColor, Offset(vx, y), Offset(vx - arrow * 0.6f, y + arrow), strokeWidth = stroke)
+        drawLine(lineColor, Offset(vx, y), Offset(vx + arrow * 0.6f, y + arrow), strokeWidth = stroke)
+        drawLine(lineColor, Offset(vx, y + h), Offset(vx - arrow * 0.6f, y + h - arrow), strokeWidth = stroke)
+        drawLine(lineColor, Offset(vx, y + h), Offset(vx + arrow * 0.6f, y + h - arrow), strokeWidth = stroke)
+        // Подпись высоты — повёрнута вдоль линии
+        c.nativeCanvas.save()
+        c.nativeCanvas.rotate(-90f, vx - textPx * 0.35f, y + h / 2f)
+        c.nativeCanvas.drawText(
+            h.toInt().toString(),
+            vx - textPx * 0.35f,
+            y + h / 2f,
+            paint,
+        )
+        c.nativeCanvas.restore()
     }
 }
 

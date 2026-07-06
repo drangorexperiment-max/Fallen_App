@@ -32,16 +32,24 @@ private val PresetColors = listOf(
 )
 
 /**
- * Полноценный выбор цвета: пресеты + HSV-градиент + HEX-ввод.
+ * Полноценный выбор цвета: пресеты + HSV-градиент + HEX-ввод +
+ * пипетка (выбор цвета с холста) + 8 пользовательских ячеек палитры.
  */
 @Composable
 fun FallenColorPicker(
     currentColor: String,
     onColorSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** 8 сохранённых пользователем цветов (hex или пустая строка) */
+    customColors: List<String> = emptyList(),
+    /** Сохранение цвета в ячейку (index 0..7, hex) */
+    onSaveCustomColor: ((Int, String) -> Unit)? = null,
+    /** Провайдер снимка холста для пипетки (null — пипетка скрыта) */
+    eyedropperBitmap: (() -> android.graphics.Bitmap?)? = null,
 ) {
     var hexInput by remember(currentColor) { mutableStateOf(currentColor.removePrefix("#").uppercase()) }
     var hue by remember { mutableFloatStateOf(ColorUtils.hueOf(currentColor)) }
+    var eyedropperOpen by remember { mutableStateOf(false) }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Пресеты
@@ -82,7 +90,57 @@ fun FallenColorPicker(
                 .height(24.dp)
         )
 
-        // HEX-ввод
+        // ---------- Мои цвета: 8 ячеек ----------
+        // Тап по заполненной ячейке — выбрать цвет.
+        // Долгое нажатие по любой ячейке — сохранить текущий цвет в неё.
+        if (onSaveCustomColor != null) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "Мои цвета (долгое нажатие — сохранить)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    repeat(8) { i ->
+                        val hex = customColors.getOrNull(i) ?: ""
+                        val filled = hex.isNotBlank()
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .background(
+                                    if (filled) ColorUtils.parse(hex)
+                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                    CircleShape,
+                                )
+                                .border(
+                                    width = if (filled && currentColor.equals(hex, true)) 2.dp else 1.dp,
+                                    color = if (filled && currentColor.equals(hex, true))
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                    shape = CircleShape,
+                                )
+                                .pointerInput(hex, currentColor) {
+                                    detectTapGestures(
+                                        onTap = { if (filled) onColorSelected(hex) },
+                                        onLongPress = { onSaveCustomColor(i, currentColor) },
+                                    )
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (!filled) {
+                                Text(
+                                    text = "+",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // HEX-ввод + пипетка
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -93,6 +151,15 @@ fun FallenColorPicker(
                     .background(ColorUtils.parse(currentColor), CircleShape)
                     .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), CircleShape)
             )
+            if (eyedropperBitmap != null) {
+                IconButton(onClick = { eyedropperOpen = true }) {
+                    Icon(
+                        imageVector = Icons.Outlined.Colorize,
+                        contentDescription = "Пипетка: взять цвет с холста",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
             OutlinedTextField(
                 value = hexInput,
                 onValueChange = { raw ->

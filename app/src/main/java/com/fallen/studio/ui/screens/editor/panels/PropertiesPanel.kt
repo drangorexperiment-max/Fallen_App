@@ -56,6 +56,13 @@ fun PropertiesPanel(
     onUpdate: ((CanvasElement) -> CanvasElement) -> Unit,
     modifier: Modifier = Modifier,
     fonts: List<ProjectFont> = emptyList(),
+    canvasW: Int = 1920,
+    canvasH: Int = 1080,
+    /** Включена ли глобальная настройка «Размерные метки» */
+    dimensionMarksEnabled: Boolean = true,
+    /** Пользовательские ячейки палитры + сохранение */
+    customColors: List<String> = emptyList(),
+    onSaveCustomColor: (Int, String) -> Unit = { _, _ -> },
 ) {
     if (element == null) {
         Column(
@@ -100,6 +107,8 @@ fun PropertiesPanel(
         )
 
         // ---------- Геометрия ----------
+        // Координаты отсчитываются от ЦЕНТРА холста: 0;0 — центр,
+        // X растёт вправо, Y — вниз (как в Unity anchoredPosition, но Y инверт.)
         PanelSectionTitle("Позиция и размер")
         Row(
             modifier = Modifier
@@ -108,15 +117,21 @@ fun PropertiesPanel(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             NumberField(
-                label = "X",
-                value = element.x.toInt(),
-                onValueChange = { v -> onUpdate { it.copy(x = v.toFloat()) } },
+                label = "X (от центра)",
+                value = (element.x + element.w / 2f - canvasW / 2f).toInt(),
+                onValueChange = { v ->
+                    onUpdate { it.copy(x = v + canvasW / 2f - it.w / 2f) }
+                },
+                min = -100000,
                 modifier = Modifier.weight(1f)
             )
             NumberField(
-                label = "Y",
-                value = element.y.toInt(),
-                onValueChange = { v -> onUpdate { it.copy(y = v.toFloat()) } },
+                label = "Y (от центра)",
+                value = (element.y + element.h / 2f - canvasH / 2f).toInt(),
+                onValueChange = { v ->
+                    onUpdate { it.copy(y = v + canvasH / 2f - it.h / 2f) }
+                },
+                min = -100000,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -151,12 +166,20 @@ fun PropertiesPanel(
             valueLabel = { "${it.toInt()}%" },
             modifier = Modifier.padding(top = 8.dp)
         )
-        SliderRow(
-            label = "Поворот",
-            value = element.rotation,
-            onValueChange = { v -> onUpdate { it.copy(rotation = v) } },
-            valueRange = -180f..180f,
-            valueLabel = { "${it.toInt()}°" }
+        // Поворот выполняется кругляшком в правом верхнем углу элемента
+        // на холсте — ползунок отсюда убран по просьбе пользователя.
+
+        // Размерные метки конкретного элемента: работает только когда
+        // включена глобальная настройка «Размерные метки» (иначе затемнено)
+        SwitchRow(
+            label = "Размерные метки",
+            description = if (dimensionMarksEnabled)
+                "Показывать размеры сторон этого элемента на холсте"
+            else
+                "Включите «Размерные метки» в настройках приложения",
+            checked = element.showDimensions,
+            onCheckedChange = { v -> onUpdate { it.copy(showDimensions = v) } },
+            enabled = dimensionMarksEnabled,
         )
 
         // ---------- Текстовые свойства ----------
