@@ -28,3 +28,4 @@ captures/
 node_modules
 .next/
 .DS_Store
+.env.v0
