@@ -110,7 +110,7 @@ fun PropertiesPanel(
 
         // ---------- Геометрия ----------
         // Координаты отсчитываются от ЦЕНТРА холста: 0;0 — центр,
-        // X растёт вправо, Y — вниз (как в Unity anchoredPosition, но Y инверт.)
+        // X растёт вправо (+), Y растёт ВВЕРХ (+) — как в Unity
         PanelSectionTitle("Позиция и размер")
         Row(
             modifier = Modifier
@@ -129,9 +129,10 @@ fun PropertiesPanel(
             )
             NumberField(
                 label = "Y (от центра)",
-                value = (element.y + element.h / 2f - canvasH / 2f).toInt(),
+                // Y инвертирован: вверх от центра — плюс, вниз — минус
+                value = (canvasH / 2f - element.y - element.h / 2f).toInt(),
                 onValueChange = { v ->
-                    onUpdate { it.copy(y = v + canvasH / 2f - it.h / 2f) }
+                    onUpdate { it.copy(y = canvasH / 2f - v - it.h / 2f) }
                 },
                 min = -100000,
                 modifier = Modifier.weight(1f)
@@ -169,7 +170,7 @@ fun PropertiesPanel(
             modifier = Modifier.padding(top = 8.dp)
         )
         // Поворот выполняется кругляшком в правом верхнем углу элемента
-        // на холсте — ползунок отсюда убран по просьбе пользователя.
+        // на холсте — ползунок от��юда убран по просьбе пользователя.
 
         // Размерные метки конкретного элемента: работает только когда
         // включена глобальная настройка «Размерные метки» (иначе затемнено)
