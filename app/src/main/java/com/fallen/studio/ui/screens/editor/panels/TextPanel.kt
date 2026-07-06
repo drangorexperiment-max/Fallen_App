@@ -33,7 +33,10 @@ fun TextPanel(
     onAddText: (text: String, fontSize: Int, fontWeight: String, color: String, textAlign: String, fontFamily: String) -> Unit,
     onImportFont: () -> Unit,
     onDeleteFont: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    customColors: List<String> = emptyList(),
+    onSaveCustomColor: ((Int, String) -> Unit)? = null,
+    eyedropperBitmap: (() -> android.graphics.Bitmap?)? = null,
 ) {
     var text by remember { mutableStateOf("") }
     var fontSize by remember { mutableFloatStateOf(48f) }
@@ -225,7 +228,10 @@ fun TextPanel(
             FallenColorPicker(
                 currentColor = color,
                 onColorSelected = { color = it },
-                modifier = Modifier.padding(horizontal = 16.dp)
+                modifier = Modifier.padding(horizontal = 16.dp),
+                customColors = customColors,
+                onSaveCustomColor = onSaveCustomColor,
+                eyedropperBitmap = eyedropperBitmap,
             )
         }
 

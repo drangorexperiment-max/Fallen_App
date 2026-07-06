@@ -55,18 +55,31 @@ object ExportEngine {
             sb.appendLine("// Сгенерировано в Fallen")
             sb.appendLine("// Проект: ${project.name}")
             sb.appendLine("// Холст: ${project.canvas.w} x ${project.canvas.h}")
+            sb.appendLine("// Координаты: anchoredPosition от центра холста (пивот 0.5;0.5)")
             sb.appendLine("// ============================================")
         }
         sb.appendLine("using UnityEngine;")
-        sb.appendLine("using UnityEngine.UI;")
         sb.appendLine()
         sb.appendLine("public class FallenLayout : MonoBehaviour")
         sb.appendLine("{")
         sb.appendLine("    [Header(\"Перетащите сюда RectTransform элементов\")]")
 
         val sorted = project.elements.sortedBy { it.z }
-        sorted.forEach { el ->
-            sb.appendLine("    public RectTransform ${el.safeVarName()};")
+        // Имена C#-полей должны быть УНИКАЛЬНЫМИ: у одинаковых или
+        // нелатинских названий добавляем числовой суффикс (_2, _3...)
+        val usedNames = mutableMapOf<String, Int>()
+        val varNames = sorted.map { el ->
+            val base = el.safeVarName()
+            val count = usedNames.getOrDefault(base, 0) + 1
+            usedNames[base] = count
+            if (count == 1) base else "${base}_$count"
+        }
+
+        sorted.forEachIndexed { i, el ->
+            if (includeComments) {
+                sb.appendLine("    // ${el.displayName()}")
+            }
+            sb.appendLine("    public RectTransform ${varNames[i]};")
         }
         sb.appendLine()
         sb.appendLine("    void Start()")
@@ -79,18 +92,19 @@ object ExportEngine {
 
         val cw = project.canvas.w.toFloat()
         val ch = project.canvas.h.toFloat()
-        sorted.forEach { el ->
+        sorted.forEachIndexed { i, el ->
             // Центр элемента относительно центра холста, ось Y инвертирована (Unity: вверх +)
             val cx = el.x + el.w / 2f - cw / 2f
             val cy = -(el.y + el.h / 2f - ch / 2f)
             if (includeComments) {
                 sb.appendLine("        // ${el.displayName()} (${if (el.isText) "текст" else "изображение"})")
             }
-            val v = el.safeVarName()
+            val v = varNames[i]
             sb.appendLine("        if ($v != null)")
             sb.appendLine("        {")
             sb.appendLine("            $v.anchorMin = new Vector2(0.5f, 0.5f);")
             sb.appendLine("            $v.anchorMax = new Vector2(0.5f, 0.5f);")
+            sb.appendLine("            $v.pivot = new Vector2(0.5f, 0.5f);")
             sb.appendLine("            $v.anchoredPosition = new Vector2(${cx.fmt()}f, ${cy.fmt()}f);")
             sb.appendLine("            $v.sizeDelta = new Vector2(${el.w.fmt()}f, ${el.h.fmt()}f);")
             if (el.rotation != 0f) {

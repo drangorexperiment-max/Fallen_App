@@ -63,6 +63,8 @@ fun PropertiesPanel(
     /** Пользовательские ячейки палитры + сохранение */
     customColors: List<String> = emptyList(),
     onSaveCustomColor: (Int, String) -> Unit = { _, _ -> },
+    /** Снимок холста для пипетки (null — пипетка скрыта) */
+    eyedropperBitmap: (() -> android.graphics.Bitmap?)? = null,
 ) {
     if (element == null) {
         Column(
@@ -277,11 +279,14 @@ fun PropertiesPanel(
                 valueRange = 0f..100f
             )
 
-            // Цвет текста
+            // Цвет текста (с пипеткой и ячейками «Мои цвета»)
             ColorRow(
                 label = "Цвет текста",
                 color = element.color ?: "#FFFFFF",
-                onColorSelected = { c -> onUpdate { it.copy(color = c) } }
+                onColorSelected = { c -> onUpdate { it.copy(color = c) } },
+                customColors = customColors,
+                onSaveCustomColor = onSaveCustomColor,
+                eyedropperBitmap = eyedropperBitmap,
             )
 
             // ---------- Обводка ----------
@@ -297,7 +302,10 @@ fun PropertiesPanel(
                 ColorRow(
                     label = "Цвет обводки",
                     color = element.strokeColor ?: "#000000",
-                    onColorSelected = { c -> onUpdate { it.copy(strokeColor = c) } }
+                    onColorSelected = { c -> onUpdate { it.copy(strokeColor = c) } },
+                    customColors = customColors,
+                    onSaveCustomColor = onSaveCustomColor,
+                    eyedropperBitmap = eyedropperBitmap,
                 )
             }
 
@@ -341,7 +349,10 @@ fun PropertiesPanel(
                 ColorRow(
                     label = "Цвет тени",
                     color = element.shadowColor ?: "#000000",
-                    onColorSelected = { c -> onUpdate { it.copy(shadowColor = c) } }
+                    onColorSelected = { c -> onUpdate { it.copy(shadowColor = c) } },
+                    customColors = customColors,
+                    onSaveCustomColor = onSaveCustomColor,
+                    eyedropperBitmap = eyedropperBitmap,
                 )
             }
         }
@@ -418,7 +429,10 @@ private fun ColorRow(
     label: String,
     color: String,
     onColorSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    customColors: List<String> = emptyList(),
+    onSaveCustomColor: ((Int, String) -> Unit)? = null,
+    eyedropperBitmap: (() -> android.graphics.Bitmap?)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -443,7 +457,10 @@ private fun ColorRow(
             FallenColorPicker(
                 currentColor = color,
                 onColorSelected = onColorSelected,
-                modifier = Modifier.padding(horizontal = 16.dp)
+                modifier = Modifier.padding(horizontal = 16.dp),
+                customColors = customColors,
+                onSaveCustomColor = onSaveCustomColor,
+                eyedropperBitmap = eyedropperBitmap,
             )
         }
     }

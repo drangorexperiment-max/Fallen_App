@@ -251,6 +251,9 @@ fun EditorScreen(
                         )
                     },
                     onDeleteFont = viewModel::deleteFont,
+                    customColors = settings.customColors,
+                    onSaveCustomColor = viewModel::saveCustomColor,
+                    eyedropperBitmap = { viewModel.canvasSnapshot() },
                 )
                 EditorPanel.LAYERS -> LayersPanel(
                     elements = state.elements,
@@ -260,6 +263,9 @@ fun EditorScreen(
                     onDuplicate = viewModel::duplicateElement,
                     onMoveLayer = viewModel::moveLayer,
                     onDelete = viewModel::deleteElement,
+                    onRename = viewModel::renameElement,
+                    onToggleDimensions = viewModel::toggleDimensions,
+                    dimensionMarksEnabled = settings.showRulers,
                 )
                 EditorPanel.PROPERTIES -> PropertiesPanel(
                     element = state.selectedElement,
@@ -267,6 +273,12 @@ fun EditorScreen(
                         state.selectedId?.let { viewModel.updateElement(it, transform) }
                     },
                     fonts = state.fonts,
+                    canvasW = state.canvas.w.toInt(),
+                    canvasH = state.canvas.h.toInt(),
+                    dimensionMarksEnabled = settings.showRulers,
+                    customColors = settings.customColors,
+                    onSaveCustomColor = viewModel::saveCustomColor,
+                    eyedropperBitmap = { viewModel.canvasSnapshot() },
                 )
                 EditorPanel.EXPORT -> ExportPanel(
                     project = viewModel.currentProject(),

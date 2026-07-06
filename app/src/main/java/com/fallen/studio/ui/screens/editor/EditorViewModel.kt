@@ -830,6 +830,31 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         showToast("Холст очищен")
     }
 
+    // ---------- Пользовательская палитра ----------
+
+    /** Сохранение цвета в одну из 8 ячеек «Мои цвета» */
+    fun saveCustomColor(index: Int, hex: String) {
+        viewModelScope.launch {
+            settingsRepository.setCustomColor(index, hex)
+        }
+        haptic()
+        showToast("Цвет сохранён в палитру")
+    }
+
+    /** Снимок текущего холста для пипетки (белая подложка вместо прозрачности) */
+    fun canvasSnapshot(): android.graphics.Bitmap? {
+        return try {
+            com.fallen.studio.export.ImageExporter.render(
+                project = currentProject(),
+                scale = 0.5f,
+                transparentBackground = false,
+                context = getApplication(),
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     // ---------- Toast ----------
 
     fun showToast(message: String) {
