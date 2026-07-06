@@ -128,7 +128,7 @@ object ImageExporter {
         }
 
         // Холст целиком
-        marks(0f, 0f, project.canvas.w, project.canvas.h, inset = 24f)
+        marks(0f, 0f, project.canvas.w.toFloat(), project.canvas.h.toFloat(), inset = 24f)
         // Элементы с включёнными метками
         project.elements.forEach { el ->
             if (el.showDimensions) {
