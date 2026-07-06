@@ -150,6 +150,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 projectName = project.name,
                 isDirty = false,
             )
+            haptic(strong = true)
             showToast("Проект сохранён")
             onSaved(id)
         }
@@ -353,6 +354,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             activePanel = EditorPanel.NONE,
             isDirty = true,
         )
+        haptic(strong = true)
         showToast("«${asset.name}» добавлен")
     }
 
@@ -689,7 +691,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val s = _state.value
         val el = s.elements.find { it.id == id } ?: return
         if (el.locked || scaleStartW <= 0f) return
-        val factor = (newW / scaleStartW).coerceIn(0.05f, 50f)
+        // Чувствительность ручки масштаба приглушена вдвое:
+        // элемент меняет размер плавнее и предсказуемее
+        val rawFactor = (newW / scaleStartW).coerceIn(0.05f, 50f)
+        val factor = (1f + (rawFactor - 1f) * 0.5f).coerceIn(0.05f, 50f)
         val w = (scaleStartW * factor).coerceAtLeast(10f)
         val h = (scaleStartH * factor).coerceAtLeast(10f)
         _state.value = s.copy(
@@ -715,6 +720,47 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
+    // Угол элемента на старте жеста поворота (за кругляшок над рамкой)
+    private var rotateStartAngle = 0f
+
+    /** Вызывается в начале жеста за ручку поворота */
+    fun beginRotateGesture() {
+        pushUndo()
+        val el = _state.value.selectedElement ?: return
+        gestureElementId = el.id
+        rotateStartAngle = el.rotation
+    }
+
+    /**
+     * Поворот элемента кругляшком на рамке: deltaDegrees — смещение
+     * угла от начала жеста. С зажатой привязкой углы прилипают к 15°.
+     */
+    fun rotateElement(id: String, deltaDegrees: Float, snap: Boolean = false) {
+        val s = _state.value
+        val el = s.elements.find { it.id == id } ?: return
+        if (el.locked) return
+        var angle = (rotateStartAngle + deltaDegrees) % 360f
+        if (angle < 0f) angle += 360f
+        if (snap) angle = (Math.round(angle / 15f) * 15f) % 360f
+        _state.value = s.copy(
+            elements = s.elements.map {
+                if (it.id == id) it.copy(rotation = angle) else it
+            },
+            isDirty = true,
+        )
+    }
+
+    /** Переименование элемента (слоя) */
+    fun renameElement(id: String, newName: String) {
+        if (newName.isBlank()) return
+        updateElement(id, { it.copy(name = newName.trim()) })
+    }
+
+    /** Показ/скрытие размерных меток у конкретного элемента */
+    fun toggleDimensions(id: String) {
+        updateElement(id, { it.copy(showDimensions = !it.showDimensions) })
+    }
+
     fun deleteElement(id: String) {
         pushUndo()
         val s = _state.value
@@ -732,9 +778,10 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         val original = s.elements.find { it.id == id } ?: return
         pushUndo()
         val counter = s.counter + 1
+        // Имя дубликата совпадает с оригиналом — без суффикса «_copy»
         val copy = original.copy(
             id = "el$counter",
-            name = original.name + "_copy",
+            name = original.name,
             x = original.x + 30f,
             y = original.y + 30f,
             z = s.elements.size,
@@ -752,6 +799,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun toggleLock(id: String) {
         updateElement(id, { it.copy(locked = !it.locked) })
+        haptic()
     }
 
     fun moveLayer(id: String, up: Boolean) {
@@ -768,6 +816,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             elements = sorted.mapIndexed { i, el -> el.copy(z = i) },
             isDirty = true,
         )
+        haptic()
     }
 
     fun clearCanvas() {
@@ -777,6 +826,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             selectedId = null,
             isDirty = true,
         )
+        haptic(strong = true)
         showToast("Холст очищен")
     }
 

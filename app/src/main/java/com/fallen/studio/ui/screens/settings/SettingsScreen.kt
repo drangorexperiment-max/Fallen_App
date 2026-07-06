@@ -341,12 +341,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasSection(
         )
     }
     item {
+        // Зависимые от «Показывать сетку» настройки затемняются при выключении
         SliderRow(
             label = "Размер ячейки сетки",
             value = settings.gridSize.toFloat(),
             valueRange = 10f..200f,
             valueLabel = { "${it.toInt()} px" },
             onValueChange = { vm.setGridSize(it.toInt()) },
+            enabled = settings.gridEnabled,
         )
     }
     item {
@@ -355,6 +357,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasSection(
             description = "Границы элементов прилипают к линиям сетки при перемещении и изменении размера",
             checked = settings.snapToGrid,
             onCheckedChange = vm::setSnapToGrid,
+            enabled = settings.gridEnabled,
         )
     }
     item { PanelSectionTitle("Привязка (Snap)") }
@@ -367,12 +370,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasSection(
         )
     }
     item {
+        // Зависимые от «Магнитной привязки» настройки
         SliderRow(
             label = "Чувствительность к холсту",
             value = settings.snapCanvasSensitivity.toFloat(),
             valueRange = 3f..50f,
             valueLabel = { "${it.toInt()} px" },
             onValueChange = { vm.setSnapCanvasSensitivity(it.toInt()) },
+            enabled = settings.snapEnabled,
         )
     }
     item {
@@ -382,13 +387,14 @@ private fun androidx.compose.foundation.lazy.LazyListScope.canvasSection(
             valueRange = 2f..30f,
             valueLabel = { "${it.toInt()} px" },
             onValueChange = { vm.setSnapElementsSensitivity(it.toInt()) },
+            enabled = settings.snapEnabled,
         )
     }
     item { PanelSectionTitle("Направляющие") }
     item {
         SwitchRow(
-            label = "Линейки",
-            description = "Шкала координат по краям холста",
+            label = "Размерные метки",
+            description = "Показывать размеры холста и элементов (стрелки с шириной и высотой по краям)",
             checked = settings.showRulers,
             onCheckedChange = vm::setShowRulers,
         )
@@ -448,19 +454,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorSection(
             onValueChange = { vm.setUndoLimit(it.toInt()) },
         )
     }
-    item { PanelSectionTitle("Холст по умолчанию") }
-    item {
-        DefaultCanvasEditor(
-            w = settings.defaultCanvasW,
-            h = settings.defaultCanvasH,
-            onApply = vm::setDefaultCanvas,
-        )
-    }
     item { PanelSectionTitle("Поведение") }
     item {
         SwitchRow(
             label = "Виброотклик",
-            description = "Вибрация при выделении и привязке",
+            description = "Вибрация при выделении, добавлении, удалении, дублировании и других действиях",
             checked = settings.hapticFeedback,
             onCheckedChange = vm::setHapticFeedback,
         )
@@ -480,64 +478,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editorSection(
             checked = settings.keepAspectDefault,
             onCheckedChange = vm::setKeepAspectDefault,
         )
-    }
-}
-
-@Composable
-private fun DefaultCanvasEditor(
-    w: Int,
-    h: Int,
-    onApply: (Int, Int) -> Unit,
-) {
-    val colors = FallenTheme.colors
-    var wText by remember(w) { mutableStateOf(w.toString()) }
-    var hText by remember(h) { mutableStateOf(h.toString()) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(colors.surfaceElevated)
-            .border(1.dp, colors.divider, RoundedCornerShape(14.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Text(
-            text = "Размер нового холста",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(
-                value = wText,
-                onValueChange = { v ->
-                    wText = v.filter { it.isDigit() }
-                    val newW = wText.toIntOrNull()
-                    val newH = hText.toIntOrNull()
-                    if (newW != null && newH != null && newW >= 100 && newH >= 100) {
-                        onApply(newW, newH)
-                    }
-                },
-                label = { Text("Ширина") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedTextField(
-                value = hText,
-                onValueChange = { v ->
-                    hText = v.filter { it.isDigit() }
-                    val newW = wText.toIntOrNull()
-                    val newH = hText.toIntOrNull()
-                    if (newW != null && newH != null && newW >= 100 && newH >= 100) {
-                        onApply(newW, newH)
-                    }
-                },
-                label = { Text("Высота") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-            )
-        }
     }
 }
 
@@ -776,7 +716,7 @@ private val tutorialSteps = listOf(
     ),
     TutorialStep(
         "Создание проекта",
-        "На глав��ом экране нажмите «Новый проект» и выберите разрешение холста — базовое или своё. Проект сохраняется автоматически при каждом изменении.",
+        "На глав��ом экране на��мите «Новый проект» и выберите разрешение холста — базовое или своё. Проект сохраняется автоматически при каждом изменении.",
     ),
     TutorialStep(
         "Ассеты и текст",

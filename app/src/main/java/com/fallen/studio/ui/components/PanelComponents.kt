@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -12,7 +14,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -45,8 +50,12 @@ fun SliderRow(
     modifier: Modifier = Modifier,
     steps: Int = 0,
     valueLabel: (Float) -> String = { it.roundToInt().toString() },
-    onValueChangeFinished: (() -> Unit)? = null
+    onValueChangeFinished: (() -> Unit)? = null,
+    enabled: Boolean = true
 ) {
+    // Зависимая настройка: при выключенной основной функции
+    // строка затемняется и не реагирует на касания
+    val contentAlpha = if (enabled) 1f else 0.38f
     Column(modifier = modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -56,12 +65,12 @@ fun SliderRow(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha)
             )
             Box(
                 modifier = Modifier
                     .background(
-                        MaterialTheme.colorScheme.surfaceVariant,
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = contentAlpha),
                         RoundedCornerShape(6.dp)
                     )
                     .padding(horizontal = 8.dp, vertical = 2.dp)
@@ -69,7 +78,7 @@ fun SliderRow(
                 Text(
                     text = valueLabel(value),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = contentAlpha)
                 )
             }
         }
@@ -79,6 +88,7 @@ fun SliderRow(
             valueRange = valueRange,
             steps = steps,
             onValueChangeFinished = onValueChangeFinished,
+            enabled = enabled,
             modifier = Modifier.fillMaxWidth()
         )
     }
@@ -94,12 +104,16 @@ fun SwitchRow(
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     description: String? = null,
-    icon: ImageVector? = null
+    icon: ImageVector? = null,
+    enabled: Boolean = true
 ) {
+    // Зависимая настройка: при выключенной основной функции
+    // строка затемняется и не реагирует на касания
+    val contentAlpha = if (enabled) 1f else 0.38f
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -108,7 +122,7 @@ fun SwitchRow(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = contentAlpha),
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -116,19 +130,19 @@ fun SwitchRow(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = contentAlpha)
             )
             if (description != null) {
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = contentAlpha),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
@@ -223,7 +237,8 @@ fun ToolbarTab(
 }
 
 /**
- * Поле числового ввода со стрелками +/-.
+ * Поле числового ввода: кнопки +/- И ручной ввод цифр с клавиатуры.
+ * Поддерживает отрицательные значения (для координат от центра холста).
  */
 @Composable
 fun NumberField(
@@ -235,6 +250,10 @@ fun NumberField(
     max: Int = Int.MAX_VALUE,
     step: Int = 1
 ) {
+    // Локальный текст ввода: пока пользователь печатает, показываем как есть;
+    // при изменении value извне (перетаскивание на холсте) — синхронизируем
+    var text by remember(value) { mutableStateOf(value.toString()) }
+
     Column(modifier = modifier) {
         Text(
             text = label,
@@ -254,13 +273,30 @@ fun NumberField(
             ) {
                 Text("\u2212", color = MaterialTheme.colorScheme.primary, fontSize = 16.sp)
             }
-            Text(
-                text = value.toString(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+            BasicTextField(
+                value = text,
+                onValueChange = { raw ->
+                    // Разрешаем цифры и минус в начале (отрицательные координаты)
+                    val cleaned = buildString {
+                        raw.forEachIndexed { i, ch ->
+                            if (ch.isDigit() || (ch == '-' && i == 0 && min < 0)) append(ch)
+                        }
+                    }.take(7)
+                    text = cleaned
+                    cleaned.toIntOrNull()?.let { parsed ->
+                        onValueChange(parsed.coerceIn(min, max))
+                    }
+                },
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                ),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 6.dp)
             )
             IconButton(
                 onClick = { onValueChange((value + step).coerceIn(min, max)) },

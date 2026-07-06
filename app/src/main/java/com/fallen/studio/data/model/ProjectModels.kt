@@ -52,6 +52,9 @@ data class CanvasElement(
     val locked: Boolean = false,
     val opacity: Float = 100f,
     val rotation: Float = 0f,
+    /** Показывать размерные метки (ширина/высота) у этого элемента,
+     *  когда в настройках включены «Размерные метки». */
+    val showDimensions: Boolean = true,
     // Изображение
     val assetId: String? = null,
     val src: String? = null,
