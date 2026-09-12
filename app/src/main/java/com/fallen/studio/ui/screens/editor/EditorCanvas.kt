@@ -23,7 +23,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -32,7 +31,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntSize
 import com.fallen.studio.data.AppSettings
 import com.fallen.studio.data.model.CanvasElement
@@ -79,20 +81,22 @@ fun EditorCanvas(
     onRotate: (String, Float) -> Unit = { _, _ -> },
     /** Увеличение счётчика снаружи -> холст заново центрируется */
     recenterTrigger: Int = 0,
+    previewMode: Boolean = false,
+    onActivateElement: (String) -> Unit = {},
 ) {
+    // Node/mode changes cancel in-flight gestures and reset fit, including nodes
+    // with identical canvas dimensions. Ordinary element edits never restart input.
+    val displayedNodeId = if (previewMode) state.previewNodeId else state.activeNodeId
     var viewScale by remember { mutableFloatStateOf(0.15f) }
     var viewOffset by remember { mutableStateOf(Offset.Zero) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
-    var initialized by remember { mutableStateOf(false) }
-    // Пока пользователь сам не двигал/не масштабировал вид,
-    // холст автоматически центрируется заново
-    var userMoved by remember { mutableStateOf(false) }
+    var userMoved by remember(state.sessionId, displayedNodeId, previewMode) { mutableStateOf(false) }
+    val drawOrderedElements = remember(state.elements) { canvasElementsInDrawOrder(state.elements) }
 
     val context = LocalContext.current
 
-    // ИСПРАВЛЕНИЕ ЗУМА: pointerInput(Unit) не пересоздаётся при изменении
-    // viewScale/viewOffset/elements, поэтому жест не обрывается на каждом
-    // кадре. Актуальное состояние читается через rememberUpdatedState.
+    // Input is keyed only by session/node/mode, never by the changing viewport
+    // or elements; gestures read current callbacks/state without restarting each frame.
     val currentState by rememberUpdatedState(state)
     val currentOnSelect by rememberUpdatedState(onSelect)
     val currentOnBeginGesture by rememberUpdatedState(onBeginGesture)
@@ -103,9 +107,11 @@ fun EditorCanvas(
     val currentOnScale by rememberUpdatedState(onScale)
     val currentOnBeginRotateGesture by rememberUpdatedState(onBeginRotateGesture)
     val currentOnRotate by rememberUpdatedState(onRotate)
+    val currentPreviewMode by rememberUpdatedState(previewMode)
+    val currentOnActivateElement by rememberUpdatedState(onActivateElement)
 
     // Подсказка размеров: показывается во время ресайза/масштабирования
-    var resizeInProgress by remember { mutableStateOf(false) }
+    var resizeInProgress by remember(state.sessionId, displayedNodeId, previewMode) { mutableStateOf(false) }
 
     // Кэш декодированных Bitmap по src (LRU-подобный, простой)
     val bitmapCache = remember { mutableMapOf<String, Bitmap?>() }
@@ -118,10 +124,10 @@ fun EditorCanvas(
     // Автоцентрирование при первом измерении
     fun fitToScreen() {
         if (containerSize.width == 0 || containerSize.height == 0) return
-        val padding = 48f
-        val scaleX = (containerSize.width - padding * 2) / currentState.canvas.w
-        val scaleY = (containerSize.height - padding * 2) / currentState.canvas.h
-        viewScale = minOf(scaleX, scaleY).coerceIn(0.02f, 4f)
+        val padding = minOf(48f, containerSize.width * 0.1f, containerSize.height * 0.1f)
+        val scaleX = (containerSize.width - padding * 2) / currentState.canvas.w.coerceAtLeast(1)
+        val scaleY = (containerSize.height - padding * 2) / currentState.canvas.h.coerceAtLeast(1)
+        viewScale = minOf(scaleX, scaleY).coerceIn(0.005f, 4f)
         viewOffset = Offset(
             (containerSize.width - currentState.canvas.w * viewScale) / 2f,
             (containerSize.height - currentState.canvas.h * viewScale) / 2f,
@@ -134,7 +140,7 @@ fun EditorCanvas(
     // поэтому холст оказывался не по центру. Теперь центрирование повторяется
     // при изменении размера контейнера или холста, пока пользователь
     // сам не начал двигать/масштабировать вид.
-    LaunchedEffect(containerSize, state.canvas.w, state.canvas.h) {
+    LaunchedEffect(containerSize, state.canvas.w, state.canvas.h, state.sessionId, displayedNodeId, previewMode) {
         if (!userMoved) fitToScreen()
     }
 
@@ -149,14 +155,14 @@ fun EditorCanvas(
     fun screenToCanvas(p: Offset): Offset =
         Offset((p.x - viewOffset.x) / viewScale, (p.y - viewOffset.y) / viewScale)
 
-    /** Хит-тест элементов сверху вниз (по z) */
-    fun hitTest(canvasPoint: Offset): CanvasElement? =
-        currentState.elements
-            .sortedByDescending { it.z }
-            .firstOrNull { el ->
-                canvasPoint.x >= el.x && canvasPoint.x <= el.x + el.w &&
-                    canvasPoint.y >= el.y && canvasPoint.y <= el.y + el.h
-            }
+    /** Inverse-rotation picking in precisely the reverse of the renderer's z order. */
+    fun hitTest(canvasPoint: Offset): CanvasElement? {
+        if (currentPreviewMode &&
+            (canvasPoint.x < 0f || canvasPoint.y < 0f ||
+                canvasPoint.x > currentState.canvas.w || canvasPoint.y > currentState.canvas.h)
+        ) return null
+        return hitTestCanvasElement(currentState.elements, canvasPoint.x, canvasPoint.y)
+    }
 
     /** Хит-тест ручек ресайза выделенного элемента */
     fun hitTestHandle(canvasPoint: Offset): Handle? {
@@ -206,24 +212,54 @@ fun EditorCanvas(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
+                .semantics {
+                    contentDescription = if (previewMode) {
+                        "Холст Preview. Нажмите элемент для перехода. Два пальца — масштаб и перемещение."
+                    } else {
+                        "Холст редактора. Нажмите элемент для выбора. Два пальца — масштаб и перемещение."
+                    }
+                    if (previewMode) {
+                        val actionableIds = state.transitions
+                            .filter { it.fromNodeId == displayedNodeId }
+                            .map { it.elementId }.toSet()
+                        customActions = drawOrderedElements.asReversed()
+                            .filter { it.id in actionableIds }
+                            .map { element ->
+                                CustomAccessibilityAction(
+                                    label = "Нажать ${element.name.ifBlank { "элемент ${element.id}" }}",
+                                    action = { currentOnActivateElement(element.id); true },
+                                )
+                            }
+                    }
+                }
+                .pointerInput(state.sessionId, displayedNodeId, previewMode) {
                     awaitEachGesture {
                         val firstDown = awaitFirstDown()
+                        val previewGesture = currentPreviewMode
                         var mode = GestureMode.NONE
                         var activeHandle: Handle? = null
                         var gestureStarted = false
 
                         val startCanvasPoint = screenToCanvas(firstDown.position)
-                        val handleHit = hitTestHandle(startCanvasPoint)
+                        val handleHit = if (previewGesture) null else hitTestHandle(startCanvasPoint)
                         val elementHit = hitTest(startCanvasPoint)
 
                         while (true) {
                             val event = awaitPointerEvent()
                             if (event.changes.all { !it.pressed }) {
                                 // Отпустили все пальцы
-                                if (mode == GestureMode.NONE) {
-                                    // Это был тап — выделение
-                                    currentOnSelect(elementHit?.id)
+                                if (mode == GestureMode.NONE && event.changes.none { it.isConsumed }) {
+                                    if (previewGesture) {
+                                        // Only a tap that ends on the same topmost element activates.
+                                        // A drag or any multi-touch gesture never becomes a click.
+                                        val end = event.changes.firstOrNull { it.id == firstDown.id }?.position
+                                        val endHit = end?.let { hitTest(screenToCanvas(it)) }
+                                        if (elementHit != null && endHit?.id == elementHit.id &&
+                                            end != null && (end - firstDown.position).getDistance() <= viewConfiguration.touchSlop
+                                        ) currentOnActivateElement(elementHit.id)
+                                    } else {
+                                        currentOnSelect(elementHit?.id)
+                                    }
                                 }
                                 resizeInProgress = false
                                 break
@@ -242,7 +278,7 @@ fun EditorCanvas(
                                 val centroid = event.calculateCentroid()
                                 if (zoom != 1f || pan != Offset.Zero) {
                                     val oldScale = viewScale
-                                    val newScale = (oldScale * zoom).coerceIn(0.02f, 6f)
+                                    val newScale = (oldScale * zoom).coerceIn(0.005f, 6f)
                                     // Масштабирование относительно центра жеста
                                     viewOffset = Offset(
                                         centroid.x - (centroid.x - viewOffset.x) * (newScale / oldScale) + pan.x,
@@ -265,7 +301,20 @@ fun EditorCanvas(
                             val change = event.changes.firstOrNull { it.pressed } ?: continue
                             if (!change.positionChanged()) continue
 
+                            // Respect Android touch slop so small finger jitter is still a tap.
+                            if (mode == GestureMode.NONE &&
+                                (change.position - firstDown.position).getDistance() <= viewConfiguration.touchSlop
+                            ) continue
+
                             val delta = change.position - change.previousPosition
+                            if (previewGesture) {
+                                // Preview has no path into authoring callbacks or undo snapshots.
+                                mode = GestureMode.PAN
+                                userMoved = true
+                                viewOffset += delta
+                                change.consume()
+                                continue
+                            }
                             val canvasDelta = Offset(delta.x / viewScale, delta.y / viewScale)
 
                             when {
@@ -371,12 +420,6 @@ fun EditorCanvas(
                     }
                 },
         ) {
-            if (!initialized && size.width > 0) {
-                containerSize = IntSize(size.width.toInt(), size.height.toInt())
-                initialized = true
-                fitToScreen()
-            }
-
             withTransform({
                 translate(viewOffset.x, viewOffset.y)
                 scale(viewScale, viewScale, Offset.Zero)
@@ -385,11 +428,13 @@ fun EditorCanvas(
                 val canvasH = state.canvas.h.toFloat()
 
                 // ---------- Тень рабочего поля (выделение на фоне) ----------
-                drawRect(
-                    color = Color.Black.copy(alpha = if (isDarkTheme) 0.6f else 0.18f),
-                    topLeft = Offset(-8f / viewScale, -8f / viewScale),
-                    size = Size(canvasW + 16f / viewScale, canvasH + 16f / viewScale),
-                )
+                if (!previewMode) {
+                    drawRect(
+                        color = Color.Black.copy(alpha = if (isDarkTheme) 0.6f else 0.18f),
+                        topLeft = Offset(-8f / viewScale, -8f / viewScale),
+                        size = Size(canvasW + 16f / viewScale, canvasH + 16f / viewScale),
+                    )
+                }
 
                 // ---------- Фон рабочего поля ----------
                 drawRect(
@@ -402,7 +447,7 @@ fun EditorCanvas(
                 // Шаг подстраивается под разрешение холста (ровно делит его),
                 // та же формула используется при привязке к сетке —
                 // границы элементов совпадают с линиями.
-                if (settings.gridEnabled) {
+                if (!previewMode && settings.gridEnabled) {
                     val stepX = effectiveGridStep(state.canvas.w, settings.gridSize)
                     val stepY = effectiveGridStep(state.canvas.h, settings.gridSize)
                     val gridStroke = 1f / viewScale
@@ -429,7 +474,7 @@ fun EditorCanvas(
                 }
 
                 // ---------- Центральные направляющие ----------
-                if (settings.showCenterGuides) {
+                if (!previewMode && settings.showCenterGuides) {
                     val dash = PathEffect.dashPathEffect(
                         floatArrayOf(12f / viewScale, 8f / viewScale),
                     )
@@ -451,55 +496,60 @@ fun EditorCanvas(
 
                 // ---------- Элементы (по z-порядку) ----------
                 // Поворот применяется вокруг центра элемента
-                state.elements.sortedBy { it.z }.forEach { el ->
-                    withTransform({
-                        if (el.rotation != 0f) {
-                            rotate(
-                                degrees = el.rotation,
-                                pivot = Offset(el.x + el.w / 2f, el.y + el.h / 2f),
-                            )
-                        }
-                    }) {
-                    val alpha = (el.opacity / 100f).coerceIn(0f, 1f)
-                    if (el.isImage) {
-                        val bmp = bitmapFor(el.src)
-                        if (bmp != null) {
-                            // Растягивание вкл: картинка заполняет рамку целиком.
-                            // Растягивание выкл: картинка вписывается по центру
-                            // рамки без искажений (как ведёт себя текст).
-                            val dst = if (settings.imageStretchEnabled) {
-                                android.graphics.RectF(el.x, el.y, el.x + el.w, el.y + el.h)
-                            } else {
-                                val scale = minOf(el.w / bmp.width, el.h / bmp.height)
-                                val dw = bmp.width * scale
-                                val dh = bmp.height * scale
-                                val dx = el.x + (el.w - dw) / 2f
-                                val dy = el.y + (el.h - dh) / 2f
-                                android.graphics.RectF(dx, dy, dx + dw, dy + dh)
+                withTransform({
+                    // Preview is the screen itself, not the editor's out-of-bounds staging area.
+                    if (previewMode) clipRect(0f, 0f, canvasW, canvasH)
+                }) {
+                    drawOrderedElements.forEach { el ->
+                        withTransform({
+                            if (el.rotation != 0f) {
+                                rotate(
+                                    degrees = el.rotation,
+                                    pivot = Offset(el.x + el.w / 2f, el.y + el.h / 2f),
+                                )
                             }
-                            drawIntoCanvasWithAlpha(alpha) {
-                                it.nativeCanvas.drawBitmap(bmp, null, dst, null)
+                        }) {
+                            val alpha = (el.opacity / 100f).coerceIn(0f, 1f)
+                            if (el.isImage) {
+                                val bmp = bitmapFor(el.src)
+                                if (bmp != null) {
+                                    // Растягивание вкл: картинка заполняет рамку целиком.
+                                    // Растягивание выкл: картинка вписывается по центру
+                                    // рамки без искажений (как ведёт себя текст).
+                                    val dst = if (settings.imageStretchEnabled) {
+                                        android.graphics.RectF(el.x, el.y, el.x + el.w, el.y + el.h)
+                                    } else {
+                                        val scale = minOf(el.w / bmp.width, el.h / bmp.height)
+                                        val dw = bmp.width * scale
+                                        val dh = bmp.height * scale
+                                        val dx = el.x + (el.w - dw) / 2f
+                                        val dy = el.y + (el.h - dh) / 2f
+                                        android.graphics.RectF(dx, dy, dx + dw, dy + dh)
+                                    }
+                                    drawIntoCanvasWithAlpha(alpha) {
+                                        it.nativeCanvas.drawBitmap(bmp, null, dst, null)
+                                    }
+                                } else {
+                                    // Existing error fallback only; real assets are never substituted.
+                                    drawRect(
+                                        color = Color.Gray.copy(alpha = 0.3f),
+                                        topLeft = Offset(el.x, el.y),
+                                        size = Size(el.w, el.h),
+                                    )
+                                }
+                            } else if (el.isText) {
+                                drawIntoCanvasWithAlpha(alpha) {
+                                    TextElementRenderer.draw(it.nativeCanvas, el, state.fonts, context)
+                                }
                             }
-                        } else {
-                            // Плейсхолдер, если ассет не декодировался
-                            drawRect(
-                                color = Color.Gray.copy(alpha = 0.3f),
-                                topLeft = Offset(el.x, el.y),
-                                size = Size(el.w, el.h),
-                            )
-                        }
-                    } else if (el.isText) {
-                        drawIntoCanvasWithAlpha(alpha) {
-                            TextElementRenderer.draw(it.nativeCanvas, el, state.fonts, context)
                         }
                     }
-                    } // конец withTransform (поворот элемента)
-                }
+                } // preview clipping
 
                 // ---------- Затемнение области вне холста ----------
                 // Рисуется ПОВЕРХ элементов: части элементов, выходящие
                 // за пределы рабочего поля, приглушаются
-                if (settings.canvasDimOutside) {
+                if (!previewMode && settings.canvasDimOutside) {
                     val dimColor = Color.Black.copy(alpha = if (isDarkTheme) 0.55f else 0.35f)
                     val big = 100000f
                     // Слева, справа, сверху, снизу от холста
@@ -510,7 +560,7 @@ fun EditorCanvas(
                 }
 
                 // ---------- Рамка выделения и ручки ----------
-                state.selectedElement?.let { el ->
+                (if (previewMode) null else state.selectedElement)?.let { el ->
                     val selStroke = 2f / viewScale
                     drawRect(
                         color = colors.selection,
@@ -656,18 +706,20 @@ fun EditorCanvas(
                 }
 
                 // ---------- Рамка рабочего поля ----------
-                drawRect(
-                    color = colors.selection.copy(alpha = 0.5f),
-                    topLeft = Offset.Zero,
-                    size = Size(canvasW, canvasH),
-                    style = Stroke(width = 2f / viewScale),
-                )
+                if (!previewMode) {
+                    drawRect(
+                        color = colors.selection.copy(alpha = 0.5f),
+                        topLeft = Offset.Zero,
+                        size = Size(canvasW, canvasH),
+                        style = Stroke(width = 2f / viewScale),
+                    )
+                }
 
                 // ---------- Размерные метки (настройка «Размерные метки») ----------
                 // Стрелки с разрешением сторон: нижняя граница — ширина,
                 // правая граница — высота. У холста и у каждого элемента,
                 // если у элемента не отключено в Слоях/Свойствах.
-                if (settings.showRulers) {
+                if (!previewMode && settings.showRulers) {
                     val labelColor = if (isDarkTheme) {
                         android.graphics.Color.argb(230, 235, 235, 245)
                     } else {

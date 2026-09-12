@@ -454,7 +454,7 @@ private fun ProjectCard(
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "${project.canvasW} × ${project.canvasH}",
+                text = "${project.nodeCount} экр. · ${project.canvasW} × ${project.canvasH}",
                 fontSize = 12.sp,
                 color = colors.textSecondary,
             )

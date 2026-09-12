@@ -1,8 +1,6 @@
 package com.fallen.studio.ui.screens.editor.panels
 
 import android.graphics.Bitmap
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -36,7 +34,7 @@ import com.fallen.studio.util.ImageUtils
 @Composable
 fun AssetsPanel(
     assets: List<Asset>,
-    onAddAsset: (android.net.Uri) -> Unit,
+    onRequestAsset: () -> Unit,
     onPlaceAsset: (String) -> Unit,
     onRenameAsset: (String, String) -> Unit,
     onDeleteAsset: (String) -> Unit,
@@ -44,12 +42,6 @@ fun AssetsPanel(
 ) {
     var renameTarget by remember { mutableStateOf<Asset?>(null) }
     var deleteTarget by remember { mutableStateOf<Asset?>(null) }
-
-    val pickImage = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let(onAddAsset)
-    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -65,7 +57,7 @@ fun AssetsPanel(
                 color = MaterialTheme.colorScheme.onSurface
             )
             FilledTonalButton(
-                onClick = { pickImage.launch("image/*") },
+                onClick = onRequestAsset,
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Icon(

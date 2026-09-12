@@ -11,7 +11,7 @@ import com.fallen.studio.data.model.Asset
 import com.fallen.studio.data.model.CanvasElement
 import com.fallen.studio.data.model.CanvasSize
 import com.fallen.studio.data.model.FallenProject
-import com.fallen.studio.data.model.ProjectFont
+import com.fallen.studio.data.model.TransitionKind
 import com.fallen.studio.util.FontManager
 import com.fallen.studio.util.Haptics
 import com.fallen.studio.util.ImageUtils
@@ -42,15 +42,6 @@ fun effectiveGridStep(canvasSide: Int, gridSize: Int): Float {
     return canvasSide / cells.toFloat()
 }
 
-/** Снимок для undo/redo */
-private data class Snapshot(
-    val canvas: CanvasSize,
-    val assets: List<Asset>,
-    val elements: List<CanvasElement>,
-    val fonts: List<ProjectFont>,
-    val counter: Int,
-)
-
 class EditorViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = ProjectRepository(application)
@@ -62,8 +53,8 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private val _state = MutableStateFlow(EditorState())
     val state: StateFlow<EditorState> = _state.asStateFlow()
 
-    private val undoStack = ArrayDeque<Snapshot>()
-    private val redoStack = ArrayDeque<Snapshot>()
+    private val undoStack = ArrayDeque<EditorSnapshot>()
+    private val redoStack = ArrayDeque<EditorSnapshot>()
     private val saveMutex = Mutex()
     private var loadJob: Job? = null
     private var sessionInitialized = false
@@ -71,6 +62,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private var autosaveGeneration = 0L
     private var exitRequestConsumed = false
     private var loadRequest: LoadRequest? = null
+    // VM-owned slots survive screen recreation; stale requests stay reserved until their callback.
+    private val assetImportRequest = EditorImportRequest()
+    private val fontImportRequest = EditorImportRequest()
 
     private data class LoadRequest(val id: String?, val canvasW: Int, val canvasH: Int)
 
@@ -86,7 +80,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
      * Это не восстановление несохранённого черновика после завершения процесса.
      */
     fun loadProject(id: String?, canvasW: Int = 0, canvasH: Int = 0) {
-        if (sessionInitialized) return
+        if (sessionInitialized || _state.value.isPreview || _state.value.isExitRequested) return
         sessionInitialized = true
         val request = LoadRequest(id, canvasW, canvasH)
         loadRequest = request
@@ -100,6 +94,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun beginLoad(request: LoadRequest) {
+        resetGestures()
         loadJob?.cancel()
         val sessionId = ++nextSessionId
         exitRequestConsumed = false
@@ -143,6 +138,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun importProject(project: FallenProject) {
+        if (_state.value.isPreview || _state.value.isExitRequested) return
         loadJob?.cancel()
         sessionInitialized = true
         loadRequest = null
@@ -156,6 +152,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun applyProject(project: FallenProject, sessionId: Long) {
+        resetGestures()
         _state.value = project.toEditorState(sessionId)
     }
 
@@ -177,7 +174,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         onSaved: (String) -> Unit = {},
     ) {
         val s = _state.value
-        if (!s.isSessionReady || s.isExitRequested || s.isManualSavePending) return
+        if (!s.canEditProject || s.isManualSavePending) return
         // Имя — такая же правка проекта: при ошибке оно остаётся в dirty-черновике.
         val edited = if (name != null && name != s.projectName) {
             s.copy(projectName = name).withProjectEdit()
@@ -220,12 +217,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         automatic: Boolean,
         expectedRevision: Long? = null,
         expectedAutosaveGeneration: Long? = null,
+        expectedAuthoringEpoch: Long? = null,
     ): FallenProject? = saveMutex.withLock {
         val s = _state.value
-        if (s.sessionId != sessionId || !s.isSessionReady || s.isExitRequested) return@withLock null
+        if (s.sessionId != sessionId || !s.canEditProject) return@withLock null
         if (automatic && (!settings.value.autosaveEnabled || !s.isDirty || s.showExitDialog ||
                 s.isManualSavePending || s.revision != expectedRevision ||
-                expectedAutosaveGeneration != autosaveGeneration)
+                expectedAutosaveGeneration != autosaveGeneration || s.authoringEpoch != expectedAuthoringEpoch)
         ) return@withLock null
         val token = s.saveToken()
         val snapshot = s.toProjectSnapshot()
@@ -267,6 +265,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                             automatic = true,
                             expectedRevision = token.revision,
                             expectedAutosaveGeneration = generation,
+                            expectedAuthoringEpoch = token.authoringEpoch,
                         )
                     }
                 }
@@ -276,7 +275,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     fun openSaveDialog() {
         val s = _state.value
-        if (!s.isSessionReady || s.saveInProgress || s.isExitRequested || s.showExitDialog) return
+        if (!s.canEditProject || s.saveInProgress || s.showExitDialog) return
         _state.value = s.copy(showSaveDialog = true, saveError = null)
     }
 
@@ -293,6 +292,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun requestExit() {
         val s = _state.value
         when {
+            s.isPreview -> stopPreview()
             s.isExitRequested -> Unit
             s.activePanel != EditorPanel.NONE -> closePanel()
             s.showSaveDialog -> dismissSaveDialog()
@@ -308,12 +308,17 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun discardAndExit() {
+        if (_state.value.isPreview) {
+            stopPreview()
+            return
+        }
         // Уже начавшуюся запись нельзя выдать за отменённую. Ждём её завершения.
         if (_state.value.saveInProgress) return
         leaveEditor()
     }
 
     private fun leaveEditor() {
+        resetGestures()
         loadJob?.cancel()
         _state.value = _state.value.copy(
             isExitRequested = true,
@@ -333,41 +338,47 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun pushUndo() {
         val s = _state.value
-        undoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.fonts, s.counter))
+        if (!s.canEditProject) return
+        undoStack.addLast(s.undoSnapshot())
         val limit = settings.value.undoLimit.coerceAtLeast(5)
         while (undoStack.size > limit) undoStack.removeFirst()
         redoStack.clear()
         updateUndoRedoFlags()
     }
 
+    /** Pure operations produce a single revision; history flags always come from the live stacks. */
+    private fun editProject(transform: (EditorState) -> EditorState): Boolean {
+        val before = _state.value
+        if (!before.canEditProject) return false
+        val edited = transform(before)
+        if (edited == before) return false
+        pushUndo()
+        _state.value = edited.copy(canUndo = _state.value.canUndo, canRedo = _state.value.canRedo)
+        if (before.activeNodeId != edited.activeNodeId) resetGestures()
+        return true
+    }
+
     fun undo() {
+        if (!_state.value.canEditProject) return
         val snapshot = undoStack.removeLastOrNull() ?: return
-        val s = _state.value
-        redoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.fonts, s.counter))
+        redoStack.addLast(_state.value.undoSnapshot())
         restore(snapshot)
         haptic(strong = true)
         showToast("Отменено")
     }
 
     fun redo() {
+        if (!_state.value.canEditProject) return
         val snapshot = redoStack.removeLastOrNull() ?: return
-        val s = _state.value
-        undoStack.addLast(Snapshot(s.canvas, s.assets, s.elements, s.fonts, s.counter))
+        undoStack.addLast(_state.value.undoSnapshot())
         restore(snapshot)
         haptic(strong = true)
         showToast("Возвращено")
     }
 
-    private fun restore(snapshot: Snapshot) {
-        val selected = _state.value.selectedId
-        _state.value = _state.value.copy(
-            canvas = snapshot.canvas,
-            assets = snapshot.assets,
-            elements = snapshot.elements,
-            fonts = snapshot.fonts,
-            counter = snapshot.counter,
-            selectedId = if (snapshot.elements.any { it.id == selected }) selected else null,
-        ).withProjectEdit()
+    private fun restore(snapshot: EditorSnapshot) {
+        _state.value = _state.value.restoreSnapshot(snapshot)
+        resetGestures()
         updateUndoRedoFlags()
     }
 
@@ -381,9 +392,82 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     // ---------- Канвас ----------
 
     fun setCanvasSize(w: Int, h: Int) {
-        if (w < 100 || h < 100 || w > 10000 || h > 10000) return
-        pushUndo()
-        _state.value = _state.value.copy(canvas = CanvasSize(w, h)).withProjectEdit()
+        if (w !in 100..10000 || h !in 100..10000) return
+        editProject { s ->
+            if (s.canvas == CanvasSize(w, h)) s else s.copy(canvas = CanvasSize(w, h)).withProjectEdit()
+        }
+    }
+
+    // ---------- Ноды и переходы ----------
+
+    fun createNode(name: String, width: Int, height: Int) {
+        editProject { it.withCreatedNode(name, width, height) }
+    }
+
+    fun selectNode(id: String) {
+        editProject { it.withSelectedNode(id) }
+    }
+
+    fun renameNode(id: String, name: String) {
+        editProject { it.withRenamedNode(id, name) }
+    }
+
+    fun duplicateNode(id: String) {
+        if (editProject { it.withDuplicatedNode(id) }) showToast("Нод дублирован")
+    }
+
+    fun deleteNode(id: String) {
+        if (!_state.value.canEditProject) return
+        if (_state.value.nodes.size == 1 && _state.value.nodes.any { it.id == id }) {
+            showToast("Нельзя удалить последний нод")
+            return
+        }
+        if (editProject { it.withDeletedNode(id) }) showToast("Нод удалён")
+    }
+
+    fun setStartNode(id: String) {
+        editProject { it.withStartNode(id) }
+    }
+
+    fun setElementTransition(elementId: String, targetNodeId: String) {
+        editProject { it.withElementAction(elementId, TransitionKind.OPEN_SCREEN, targetNodeId) }
+    }
+
+    fun setElementBackAction(elementId: String) {
+        editProject { it.withElementAction(elementId, TransitionKind.BACK) }
+    }
+
+    fun clearElementTransition(elementId: String) {
+        editProject { it.withClearedElementAction(elementId) }
+    }
+
+    // ---------- Preview: no authoring fields, revisions or undo entries are changed ----------
+
+    fun startPreview() {
+        val before = _state.value
+        val preview = before.withPreviewStarted()
+        if (preview === before) return
+        // Invalidate a debounce already waiting for the save mutex as well as stale gestures/imports.
+        autosaveGeneration++
+        resetGestures()
+        _state.value = preview
+    }
+
+    fun stopPreview() {
+        val before = _state.value
+        val authoring = before.withPreviewStopped()
+        if (authoring === before) return
+        autosaveGeneration++
+        resetGestures()
+        _state.value = authoring
+    }
+
+    fun previewBack() {
+        _state.value = _state.value.withPreviewBack()
+    }
+
+    fun activatePreviewElement(elementId: String) {
+        _state.value = _state.value.withPreviewElementActivated(elementId)
     }
 
     // ---------- Выделение и панели ----------
@@ -395,76 +479,82 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun select(id: String?) {
+        val s = _state.value
+        if (!s.canEditProject || (id != null && s.elements.none { it.id == id })) return
+        if (id != s.selectedId) resetGestures()
         // Вибрация только при выборе элемента (не при снятии выделения)
         if (id != null && id != _state.value.selectedId) haptic()
         _state.value = _state.value.copy(selectedId = id)
     }
 
     fun openPanel(panel: EditorPanel) {
+        if (!_state.value.canEditProject) return
         _state.value = _state.value.copy(
             activePanel = if (_state.value.activePanel == panel) EditorPanel.NONE else panel,
         )
     }
 
     fun closePanel() {
+        if (!_state.value.canEditProject) return
         _state.value = _state.value.copy(activePanel = EditorPanel.NONE)
     }
 
     // ---------- Ассеты ----------
 
+    /** Reserve the image request BEFORE launching the picker, never from its result callback. */
+    fun beginAssetImport(): Boolean = assetImportRequest.begin(_state.value)
+
+    /** Null (picker cancellation or launch failure) also consumes the pending request. */
+    fun completeAssetImport(uri: Uri?) {
+        val token = assetImportRequest.complete(_state.value, hasResult = uri != null) ?: return
+        if (uri != null) importAsset(uri, token)
+    }
+
+    /** Direct URI API for callers that do not launch a picker. */
     fun addAssetFromUri(uri: Uri) {
+        val token = _state.value.authoringToken() ?: return
+        importAsset(uri, token)
+    }
+
+    private fun importAsset(uri: Uri, token: EditorAuthoringToken) {
         viewModelScope.launch {
+            if (!_state.value.acceptsAuthoringResult(token)) return@launch
             val context = getApplication<Application>()
             val dataUrl = ImageUtils.uriToDataUrl(context, uri)
+            if (!_state.value.acceptsAuthoringResult(token)) return@launch
             if (dataUrl == null) {
                 showToast("Не удалось загрузить изображение")
                 return@launch
             }
             val name = ImageUtils.fileNameFromUri(context, uri)
-            pushUndo()
+            if (!_state.value.acceptsAuthoringResult(token)) return@launch
             val asset = Asset(
                 id = "a${System.currentTimeMillis()}_${(0..9999).random()}",
                 name = name,
                 src = dataUrl,
             )
-            _state.value = _state.value.copy(
-                assets = _state.value.assets + asset,
-            ).withProjectEdit()
-            showToast("Ассет «$name» добавлен")
+            if (editProject {
+                if (it.acceptsAuthoringResult(token)) it.copy(assets = it.assets + asset).withProjectEdit() else it
+            }) showToast("Ассет «$name» добавлен")
         }
     }
 
     fun renameAsset(id: String, newName: String) {
-        pushUndo()
-        _state.value = _state.value.copy(
-            assets = _state.value.assets.map {
-                if (it.id == id) it.copy(name = newName) else it
-            },
-            elements = _state.value.elements.map {
-                if (it.assetId == id) it.copy(name = newName) else it
-            },
-        ).withProjectEdit()
+        editProject { it.withRenamedAsset(id, newName) }
     }
 
     fun deleteAsset(id: String) {
-        pushUndo()
-        val s = _state.value
-        val remainingElements = s.elements.filter { it.assetId != id }
-        _state.value = s.copy(
-            assets = s.assets.filter { it.id != id },
-            elements = remainingElements,
-            selectedId = if (remainingElements.any { it.id == s.selectedId }) s.selectedId else null,
-        ).withProjectEdit()
-        showToast("Ассет удалён")
+        if (editProject { it.withDeletedAsset(id) }) showToast("Ассет удалён")
     }
 
     /** Добавить экземпляр ассета на канвас */
     fun placeAsset(assetId: String) {
+        if (!_state.value.canEditProject) return
         val asset = _state.value.assets.find { it.id == assetId } ?: return
+        val counter = _state.value.nextElementCounter() ?: return
         pushUndo()
         // Берём состояние после pushUndo, чтобы не вернуть устаревшие canUndo/canRedo.
         val s = _state.value
-        val counter = s.counter + 1
 
         // Определяем реальные пропорции изображения
         val bitmap = ImageUtils.decodeDataUrl(asset.src)
@@ -508,11 +598,26 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     // ---------- Шрифты ----------
 
-    /** Загружает пользовательский шрифт (.ttf / .otf) в проект */
+    /** Reserve a separate font request before launching the picker. */
+    fun beginFontImport(): Boolean = fontImportRequest.begin(_state.value)
+
+    fun completeFontImport(uri: Uri?) {
+        val token = fontImportRequest.complete(_state.value, hasResult = uri != null) ?: return
+        if (uri != null) importFont(uri, token)
+    }
+
+    /** Загружает пользовательский шрифт (.ttf / .otf) в проект без открытия picker. */
     fun addFontFromUri(uri: Uri) {
+        val token = _state.value.authoringToken() ?: return
+        importFont(uri, token)
+    }
+
+    private fun importFont(uri: Uri, token: EditorAuthoringToken) {
         viewModelScope.launch {
+            if (!_state.value.acceptsAuthoringResult(token)) return@launch
             val context = getApplication<Application>()
             val font = FontManager.fontFromUri(context, uri)
+            if (!_state.value.acceptsAuthoringResult(token)) return@launch
             if (font == null) {
                 showToast("Не удалось загрузить шрифт (нужен .ttf или .otf до 8 МБ)")
                 return@launch
@@ -521,28 +626,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                 showToast("Шрифт «${font.name}» уже добавлен")
                 return@launch
             }
-            pushUndo()
-            _state.value = _state.value.copy(
-                fonts = _state.value.fonts + font,
-            ).withProjectEdit()
-            showToast("Шрифт «${font.name}» добавлен")
+            if (editProject {
+                if (it.acceptsAuthoringResult(token)) it.copy(fonts = it.fonts + font).withProjectEdit() else it
+            }) showToast("Шрифт «${font.name}» добавлен")
         }
     }
 
-    /** Удаляет шрифт из проекта; элементы возвращаются на шрифт по умолчани�� */
+    /** Удаляет общий шрифт; текст во всех нодах получает fallback. */
     fun deleteFont(id: String) {
-        pushUndo()
-        val s = _state.value
-        val font = s.fonts.find { it.id == id } ?: return
+        if (!editProject { it.withDeletedFont(id) }) return
         FontManager.invalidate(id)
-        _state.value = s.copy(
-            fonts = s.fonts.filter { it.id != id },
-            elements = s.elements.map {
-                if (it.fontFamily == font.name || it.fontFamily == font.id) {
-                    it.copy(fontFamily = "Inter")
-                } else it
-            },
-        ).withProjectEdit()
         showToast("Шрифт удалён")
     }
 
@@ -556,13 +649,14 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         textAlign: String,
         fontFamily: String = "Inter",
     ) {
+        if (!_state.value.canEditProject) return
         if (text.isBlank()) {
             showToast("Введите текст")
             return
         }
+        val counter = _state.value.nextElementCounter() ?: return
         pushUndo()
         val s = _state.value
-        val counter = s.counter + 1
         val element = CanvasElement(
             id = "el$counter",
             type = "text",
@@ -649,11 +743,13 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateElement(id: String, transform: (CanvasElement) -> CanvasElement, recordUndo: Boolean = true) {
+        if (!_state.value.canEditProject) return
+        val original = _state.value.elements.firstOrNull { it.id == id } ?: return
+        val updated = fitTextBox(transform(original).copy(id = id))
+        if (updated == original) return
         if (recordUndo) pushUndo()
         _state.value = _state.value.copy(
-            elements = _state.value.elements.map {
-                if (it.id == id) fitTextBox(transform(it)) else it
-            },
+            elements = _state.value.elements.map { if (it.id == id) updated else it },
         ).withProjectEdit()
     }
 
@@ -663,27 +759,47 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     private var gestureRawX = 0f
     private var gestureRawY = 0f
     private var gestureElementId: String? = null
+    private var gestureNodeId: String? = null
+    private var gestureToken: EditorAuthoringToken? = null
+
+    private fun resetGestures() {
+        gestureElementId = null
+        gestureNodeId = null
+        gestureToken = null
+        scaleStartW = 0f
+        scaleStartH = 0f
+        rotateStartAngle = 0f
+    }
+
+    private fun canContinueGesture(id: String): Boolean {
+        val token = gestureToken ?: return false
+        val s = _state.value
+        return s.acceptsAuthoringResult(token) && s.activeNodeId == gestureNodeId && gestureElementId == id
+    }
+
+    private fun captureGesture(element: CanvasElement) {
+        gestureToken = _state.value.authoringToken()
+        gestureNodeId = _state.value.activeNodeId
+        gestureElementId = element.id
+    }
 
     /** Для непрерывных жестов: undo пишется один раз в начале жеста */
     fun beginGesture() {
+        if (!_state.value.canEditProject) return
+        val el = _state.value.selectedElement ?: return
+        if (el.locked) return
         pushUndo()
-        val el = _state.value.selectedElement
-        gestureElementId = el?.id
-        gestureRawX = el?.x ?: 0f
-        gestureRawY = el?.y ?: 0f
+        captureGesture(el)
+        gestureRawX = el.x
+        gestureRawY = el.y
     }
 
     fun moveElement(id: String, dx: Float, dy: Float) {
+        if (!canContinueGesture(id)) return
         val s = _state.value
         val el = s.elements.find { it.id == id } ?: return
         if (el.locked) return
 
-        // Если жест начался с другого элемента — переинициализируем raw-позицию
-        if (gestureElementId != id) {
-            gestureElementId = id
-            gestureRawX = el.x
-            gestureRawY = el.y
-        }
         gestureRawX += dx
         gestureRawY += dy
 
@@ -773,6 +889,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun resizeElement(id: String, newX: Float, newY: Float, newW: Float, newH: Float) {
+        if (!canContinueGesture(id)) return
         var x = newX
         var y = newY
         var w = newW
@@ -816,9 +933,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Вызывается в начале жеста за ручку масштабирования (правый нижний угол) */
     fun beginScaleGesture() {
-        pushUndo()
+        if (!_state.value.canEditProject) return
         val el = _state.value.selectedElement ?: return
-        gestureElementId = el.id
+        if (el.locked) return
+        pushUndo()
+        captureGesture(el)
         scaleStartW = el.w
         scaleStartH = el.h
         scaleStartFontSize = el.fontSize ?: 24
@@ -830,6 +949,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
      * у текста дополнительно масштабируется размер шрифта.
      */
     fun scaleElement(id: String, newW: Float) {
+        if (!canContinueGesture(id)) return
         val s = _state.value
         val el = s.elements.find { it.id == id } ?: return
         if (el.locked || scaleStartW <= 0f) return
@@ -866,9 +986,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Вызывается в начале жеста за ручку поворота */
     fun beginRotateGesture() {
-        pushUndo()
+        if (!_state.value.canEditProject) return
         val el = _state.value.selectedElement ?: return
-        gestureElementId = el.id
+        if (el.locked) return
+        pushUndo()
+        captureGesture(el)
         rotateStartAngle = el.rotation
     }
 
@@ -877,6 +999,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
      * угла от начала жеста. С зажатой привязкой углы прилипают к 15°.
      */
     fun rotateElement(id: String, deltaDegrees: Float, snap: Boolean = false) {
+        if (!canContinueGesture(id)) return
         val s = _state.value
         val el = s.elements.find { it.id == id } ?: return
         if (el.locked) return
@@ -902,6 +1025,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteElement(id: String) {
+        if (!_state.value.canEditProject || _state.value.elements.none { it.id == id }) return
         pushUndo()
         val s = _state.value
         _state.value = s.copy(
@@ -913,10 +1037,11 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun duplicateElement(id: String) {
+        if (!_state.value.canEditProject) return
         val original = _state.value.elements.find { it.id == id } ?: return
+        val counter = _state.value.nextElementCounter() ?: return
         pushUndo()
         val s = _state.value
-        val counter = s.counter + 1
         // Имя дубликата совпадает с оригиналом — без суффикса «_copy»
         val copy = original.copy(
             id = "el$counter",
@@ -936,17 +1061,19 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun toggleLock(id: String) {
+        if (!_state.value.canEditProject) return
         updateElement(id, { it.copy(locked = !it.locked) })
         haptic()
     }
 
     fun moveLayer(id: String, up: Boolean) {
-        pushUndo()
+        if (!_state.value.canEditProject) return
         val sorted = _state.value.elements.sortedBy { it.z }.toMutableList()
         val index = sorted.indexOfFirst { it.id == id }
         if (index < 0) return
         val target = if (up) index + 1 else index - 1
         if (target < 0 || target >= sorted.size) return
+        pushUndo()
         val tmp = sorted[index]
         sorted[index] = sorted[target]
         sorted[target] = tmp
@@ -957,6 +1084,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearCanvas() {
+        if (!_state.value.canEditProject || _state.value.elements.isEmpty()) return
         pushUndo()
         _state.value = _state.value.copy(
             elements = emptyList(),
@@ -970,7 +1098,9 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Сохранение цвета в одну из 8 ячеек «Мои цвета» */
     fun saveCustomColor(index: Int, hex: String) {
+        val token = _state.value.authoringToken() ?: return
         viewModelScope.launch {
+            if (!_state.value.acceptsAuthoringResult(token)) return@launch
             settingsRepository.setCustomColor(index, hex)
         }
         haptic()
