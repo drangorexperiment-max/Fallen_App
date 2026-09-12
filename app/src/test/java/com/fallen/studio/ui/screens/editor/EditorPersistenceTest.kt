@@ -5,6 +5,10 @@ import com.fallen.studio.data.model.CanvasElement
 import com.fallen.studio.data.model.CanvasSize
 import com.fallen.studio.data.model.FallenProject
 import com.fallen.studio.data.model.ProjectFont
+import com.fallen.studio.data.model.ProjectGraph
+import com.fallen.studio.data.model.ScreenNode
+import com.fallen.studio.data.model.NodeTransition
+import com.fallen.studio.data.model.TransitionKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -21,8 +25,26 @@ class EditorPersistenceTest {
         val state = project.toEditorState(sessionId = 10)
         val snapshot = state.toProjectSnapshot()
 
-        assertEquals(project.copy(elements = project.elements.sortedBy { it.z }), snapshot)
-        assertEquals(2, state.version)
+        val migratedNode = state.nodes.single()
+        val sortedElements = project.elements.sortedBy { it.z }
+        // v2 -> v4 is an explicit migration, not permission to drop metadata or legacy content.
+        assertEquals(2, project.version)
+        assertEquals(4, state.version)
+        assertEquals(ProjectGraph.VERSION, snapshot.version)
+        assertTrue(migratedNode.id.isNotBlank())
+        assertTrue(migratedNode.name.isNotBlank())
+        assertEquals(project.canvas, migratedNode.canvas)
+        assertEquals(sortedElements, migratedNode.elements)
+        assertEquals(migratedNode.id, state.startNodeId)
+        assertEquals(migratedNode.id, state.activeNodeId)
+        assertTrue(state.transitions.isEmpty())
+        assertEquals(project.copy(
+            version = 4,
+            elements = sortedElements,
+            nodes = listOf(migratedNode),
+            startNodeId = migratedNode.id,
+            activeNodeId = migratedNode.id,
+        ), snapshot)
         assertEquals("2020-01-02T03:04:05Z", state.created)
         assertEquals("2021-02-03T04:05:06Z", state.modified)
         assertTrue(state.isSessionReady)
@@ -37,7 +59,10 @@ class EditorPersistenceTest {
 
         assertEquals("", snapshot.created)
         assertNull(snapshot.modified)
-        assertEquals(project.version, snapshot.version)
+        assertEquals(2, project.version)
+        assertEquals(4, snapshot.version)
+        assertEquals(project.id, snapshot.id)
+        assertEquals(project.name, snapshot.name)
     }
 
     @Test
@@ -213,7 +238,14 @@ class EditorPersistenceTest {
 
         assertTrue(imported.isDirty)
         assertNull(imported.projectId)
-        assertEquals(original.version, imported.version)
+        assertEquals(2, original.version)
+        assertEquals(4, imported.version)
+        assertEquals(original.name, imported.projectName)
+        assertEquals(original.canvas, imported.nodes.single().canvas)
+        assertEquals(original.elements.sortedBy { it.z }, imported.nodes.single().elements)
+        assertEquals(original.assets, imported.assets)
+        assertEquals(original.fonts, imported.fonts)
+        assertEquals(original.counter, imported.counter)
         assertEquals(original.created, imported.created)
         assertEquals(original.modified, imported.modified)
     }
@@ -280,6 +312,140 @@ class EditorPersistenceTest {
         assertNull(dirty.copy(isSessionReady = false).autosaveToken(enabled = true))
         assertNull(fixture().toEditorState(sessionId = 1).autosaveToken(enabled = true))
         assertEquals(dirty.saveToken(), dirty.autosaveToken(enabled = true))
+    }
+
+    @Test
+    fun everyLegacyVersionMigratesToOneNodeWithoutInventingOrReplacingMetadata() {
+        for (version in 1..3) {
+            val legacy = fixture().copy(version = version)
+            val migrated = legacy.toEditorState(sessionId = version.toLong())
+            val snapshot = migrated.toProjectSnapshot()
+
+            assertEquals(4, migrated.version)
+            assertEquals(legacy.id, snapshot.id)
+            assertEquals(legacy.name, snapshot.name)
+            assertEquals(legacy.created, snapshot.created)
+            assertEquals(legacy.modified, snapshot.modified)
+            assertEquals(legacy.canvas, snapshot.nodes.single().canvas)
+            assertEquals(legacy.elements.sortedBy { it.z }, snapshot.nodes.single().elements)
+            assertEquals(legacy.assets, snapshot.assets)
+            assertEquals(legacy.fonts, snapshot.fonts)
+            assertEquals(legacy.counter, snapshot.counter)
+            assertEquals(snapshot.nodes.single().id, snapshot.startNodeId)
+            assertEquals(snapshot.startNodeId, snapshot.activeNodeId)
+            assertEquals(snapshot, snapshot.toEditorState(99).toProjectSnapshot())
+            assertEquals(0L, migrated.revision)
+            assertEquals(0L, migrated.savedRevision)
+            assertFalse(migrated.isDirty)
+        }
+    }
+
+    @Test
+    fun v4RoundTripKeepsEveryNodeActionAndAuthoringMirror() {
+        val project = graphFixture()
+        val state = project.toEditorState(sessionId = 17)
+
+        assertEquals(project, state.toProjectSnapshot())
+        assertEquals(project.nodes, state.nodes)
+        assertEquals("details", state.activeNodeId)
+        assertEquals("home", state.startNodeId)
+        assertEquals(project.nodes[1].canvas, state.canvas)
+        assertEquals(project.nodes[1].elements, state.elements)
+        assertSame(state.activeNode!!.elements, state.elements)
+        assertEquals(project.transitions, state.transitions)
+        assertEquals(project.version, state.version)
+        assertEquals(project.id, state.projectId)
+        assertEquals(project.created, state.created)
+        assertEquals(project.modified, state.modified)
+        assertFalse(state.isDirty)
+    }
+
+    @Test
+    fun lateFirstSaveKeepsNodeSwitchNewEditsAndGraphButTransfersAuthoritativeMetadata() {
+        val saving = graphFixture().copy(id = null, created = "", modified = null)
+            .toEditorState(sessionId = 31).withProjectEdit()
+        val token = saving.saveToken()
+        val saved = saving.toProjectSnapshot().copy(
+            id = "assigned-graph-id",
+            created = "2026-09-12T12:00:00Z",
+            modified = "2026-09-12T12:00:01Z",
+        )
+        val onHome = saving.withSelectedNode("home")
+        val edited = onHome.copy(
+            projectName = "Late graph edit",
+            canvas = CanvasSize(720, 480),
+            elements = onHome.elements.map { it.copy(text = "Edited during IO", locked = true) },
+            counter = 51,
+            selectedId = "home-button",
+            activePanel = EditorPanel.NODES,
+            canUndo = true,
+            canRedo = true,
+        ).withProjectEdit().withStartNode("details")
+
+        val reconciled = reconcileSavedProject(edited, token, saved)
+        val nextSnapshot = reconciled.toProjectSnapshot()
+
+        assertTrue(reconciled.isDirty)
+        assertEquals(edited.revision, reconciled.revision)
+        assertEquals(token.revision, reconciled.savedRevision)
+        assertEquals(saved.id, nextSnapshot.id)
+        assertEquals(saved.version, nextSnapshot.version)
+        assertEquals(saved.created, nextSnapshot.created)
+        assertEquals(saved.modified, nextSnapshot.modified)
+        assertSame(edited.nodes, reconciled.nodes)
+        assertSame(edited.transitions, reconciled.transitions)
+        assertSame(edited.assets, reconciled.assets)
+        assertSame(edited.fonts, reconciled.fonts)
+        assertEquals("home", nextSnapshot.activeNodeId)
+        assertEquals("details", nextSnapshot.startNodeId)
+        assertEquals("Late graph edit", nextSnapshot.name)
+        assertEquals(CanvasSize(720, 480), nextSnapshot.canvas)
+        assertEquals(edited.elements, nextSnapshot.elements)
+        assertEquals(saving.nodes[1], nextSnapshot.nodes[1])
+        assertEquals(51, nextSnapshot.counter)
+        assertEquals("home-button", reconciled.selectedId)
+        assertEquals(EditorPanel.NODES, reconciled.activePanel)
+        assertTrue(reconciled.canUndo)
+        assertTrue(reconciled.canRedo)
+    }
+
+    @Test
+    fun nodeSwitchAloneCannotBeAcknowledgedByAnEarlierSave() {
+        val saving = graphFixture().toEditorState(sessionId = 7).withProjectEdit()
+        val saved = saving.toProjectSnapshot().copy(modified = "new-date")
+        val switched = saving.withSelectedNode("home")
+
+        val result = reconcileSavedProject(switched, saving.saveToken(), saved)
+
+        assertTrue(result.isDirty)
+        assertEquals(saving.revision + 1, result.revision)
+        assertEquals(saving.revision, result.savedRevision)
+        assertEquals("home", result.activeNodeId)
+        assertEquals(switched.nodes, result.nodes)
+        assertEquals(switched.canvas, result.canvas)
+        assertEquals(switched.elements, result.elements)
+        assertEquals(saved.modified, result.modified)
+    }
+
+    private fun graphFixture(): FallenProject {
+        val home = ScreenNode("home", "Home", CanvasSize(1080, 1920), listOf(
+            CanvasElement("home-button", "text", text = "Open", showDimensions = false),
+        ))
+        val details = ScreenNode("details", "Details", CanvasSize(640, 480), listOf(
+            CanvasElement("details-button", "image", assetId = "a1", locked = true),
+        ))
+        return fixture().copy(
+            version = 4,
+            canvas = details.canvas,
+            elements = details.elements,
+            nodes = listOf(home, details),
+            activeNodeId = details.id,
+            startNodeId = home.id,
+            transitions = listOf(
+                NodeTransition("go", home.id, "home-button", TransitionKind.OPEN_SCREEN, details.id),
+                NodeTransition("back", details.id, "details-button", TransitionKind.BACK),
+            ),
+        )
     }
 
     private fun fixture() = FallenProject(

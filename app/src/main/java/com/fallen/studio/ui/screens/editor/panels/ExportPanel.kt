@@ -94,9 +94,9 @@ fun ExportPanel(
     ) { uri ->
         if (uri != null) {
             runCatching {
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(generatedCode.toByteArray())
-                }
+                val output = context.contentResolver.openOutputStream(uri)
+                    ?: error("Output stream is unavailable")
+                output.use { out -> out.write(generatedCode.toByteArray(Charsets.UTF_8)) }
                 onToast("Файл сохранён")
             }.onFailure { onToast("Не удалось сохранить файл") }
         }
@@ -118,9 +118,11 @@ fun ExportPanel(
     ) { uri ->
         if (uri != null) {
             runCatching {
-                context.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(ProjectSerializer.encode(project).toByteArray())
-                }
+                // Encode the full graph before opening/truncating the destination.
+                val bytes = ProjectSerializer.encode(project).toByteArray(Charsets.UTF_8)
+                val output = context.contentResolver.openOutputStream(uri)
+                    ?: error("Output stream is unavailable")
+                output.use { out -> out.write(bytes) }
                 onToast("Файл проекта сохранён")
             }.onFailure { onToast("Не удалось сохранить файл проекта") }
         }
@@ -140,8 +142,16 @@ fun ExportPanel(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
+        Text(
+            text = "Расстановка и PNG: только активный экран «${project.nodes.firstOrNull { it.id == project.activeNodeId }?.name ?: "Экран"}». " +
+                "Unity C# пока не переносит ноды и переходы. Полный граф, ассеты и шрифты сохраняются в .fallen v4; старые версии Fallen этот формат не поддерживают.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+
         // ---------- Формат ----------
-        PanelSectionTitle("Формат расстановки")
+        PanelSectionTitle("Расстановка активного экрана")
         ExportFormat.entries.forEach { f ->
             Row(
                 modifier = Modifier
@@ -401,7 +411,7 @@ fun ExportPanel(
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
         PanelSectionTitle("Файл проекта")
         Text(
-            text = "Сохраните проект в файл .fallen, чтобы хранить его на вашем устройстве, а также отправить другому пользователю.",
+            text = "Полный проект .fallen v4: все экраны (${project.nodes.size}), связи, изображения и шрифты. Для резервной копии и переноса используйте этот файл, а не JSON расстановки одного экрана.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp)

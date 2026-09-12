@@ -46,7 +46,10 @@ internal class ProjectFileStore(
     /** Только синхронная работа; repository вызывает её на Dispatchers.IO. */
     fun <T> transaction(block: () -> T): T = synchronized(lock) { block() }
 
-    /** null означает отсутствие пригодной версии; ошибки чтения не маскируются пустым проектом. */
+    /**
+     * null означает отсутствие пригодной версии. decode возвращает null для corruption,
+     * но исключение неподдерживаемой схемы (не IOException) немедленно прерывает fallback.
+     */
     fun <T : Any> read(id: String, decode: (String) -> T?): T? = transaction {
         val paths = paths(id)
         ensureDirectory()
@@ -72,20 +75,29 @@ internal class ProjectFileStore(
     }
 
     /**
-     * isValid должен возвращать false для повреждённого содержимого (не создавать пустую модель).
+     * isValid возвращает false для corruption, но бросает не-IOException для неподдерживаемой
+     * схемы (как и decode в read). Все existing candidates проверяются до создания temp:
+     * даже пригодный primary не даёт права затереть backup более новой версии.
      * Ошибки до commit пробрасываются; старые primary/.bak при этом остаются на месте.
      */
     fun write(id: String, raw: String, isValid: (String) -> Boolean): Unit = transaction {
         val paths = paths(id)
         ensureDirectory()
         if (!isValid(raw)) throw IOException("Refusing an invalid project snapshot")
-        // Проверяем все целевые пути до любых изменений, в том числе существующие sidecar-файлы.
-        listOf(paths.primary, paths.pendingBackup, paths.backup).forEach { exists(it) }
-        val previous = try {
-            readIfPresent(paths.primary)?.takeIf(isValid)
-        } catch (_: CharacterCodingException) {
-            // Невалидный UTF-8 — повреждение primary, а не повод ротировать его поверх backup.
-            null
+        val candidates = listOf(paths.primary, paths.pendingBackup, paths.backup)
+        candidates.forEach { exists(it) }
+        var previous: String? = null
+        for (file in candidates) {
+            val candidate = try {
+                readIfPresent(file)
+            } catch (_: CharacterCodingException) {
+                // Невалидный UTF-8 — corruption; такой primary не ротируем поверх backup.
+                continue
+            }
+            if (candidate != null) {
+                val valid = isValid(candidate) // Unsupported version прерывает запись, не fallback.
+                if (file == paths.primary && valid) previous = candidate
+            }
         }
         val staged = stage(raw)
         var stagedBackup: File? = null

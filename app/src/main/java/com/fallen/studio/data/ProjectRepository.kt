@@ -41,12 +41,11 @@ class ProjectRepository(private val context: Context) {
     suspend fun save(project: FallenProject): String = checkNotNull(saveSnapshot(project).id)
 
     /**
-     * Возвращает фактически записанный snapshot с id/created/modified. JSON, version и данные
-     * проекта не мигрируются. При ошибке записи исключение получает вызывающий код.
+     * Возвращает фактически записанный canonical v4 snapshot с id/created/modified.
+     * Списки отделяются до нормализации; при ошибке записи исключение получает вызывающий код.
      */
     suspend fun saveSnapshot(project: FallenProject): FallenProject {
-        // Модели элементов immutable; отделяем списки от вызывающего кода до переключения на IO.
-        val snapshot = project.detachedSnapshot()
+        val snapshot = ProjectSerializer.canonicalSnapshot(project)
         return withContext(Dispatchers.IO) {
             projectFiles.transaction {
                 val saved = saveSnapshotLocked(snapshot)
@@ -88,7 +87,7 @@ class ProjectRepository(private val context: Context) {
     }
 
     private fun readProject(id: String): FallenProject? =
-        projectFiles.read(id, ProjectSerializer::decode)?.copy(id = id)
+        projectFiles.read(id, ProjectSerializer::decodeForStorage)?.copy(id = id)
 
     /** Вызывается только внутри projectFiles.transaction; никакого suspend под monitor. */
     private fun saveSnapshotLocked(project: FallenProject): FallenProject {
@@ -98,7 +97,7 @@ class ProjectRepository(private val context: Context) {
             readProject(id)?.created?.takeIf { it.isNotBlank() } ?: now
         }
         val saved = project.copy(id = id, created = created, modified = now)
-        projectFiles.write(id, ProjectSerializer.encode(saved)) { ProjectSerializer.decode(it) != null }
+        projectFiles.write(id, ProjectSerializer.encode(saved), ProjectSerializer::isValidForStorage)
         return saved
     }
 
@@ -112,7 +111,14 @@ class ProjectRepository(private val context: Context) {
 
     private fun refreshSummariesLocked() {
         val list = projectFiles.listIds()
-            .mapNotNull { readProject(it)?.toSummary() }
+            .mapNotNull { id ->
+                try {
+                    readProject(id)?.toSummary()
+                } catch (_: UnsupportedProjectVersionException) {
+                    // Home пропускает несовместимый файл; load/rename/export по ID всё ещё fail.
+                    null
+                }
+            }
             .sortedByDescending { it.modified ?: it.created }
         _summaries.value = list
     }
@@ -127,12 +133,6 @@ class ProjectRepository(private val context: Context) {
             // Не подменяем существующие summaries пустым списком при недоступном хранилище.
         }
     }
-
-    private fun FallenProject.detachedSnapshot(): FallenProject = copy(
-        assets = assets.toList(),
-        elements = elements.toList(),
-        fonts = fonts.toList(),
-    )
 
     // ---------- Импорт / экспорт файлов ----------
 
@@ -190,16 +190,14 @@ class ProjectRepository(private val context: Context) {
     // ---------- Автосохранение ----------
 
     suspend fun saveAutosave(project: FallenProject) {
-        val snapshot = project.detachedSnapshot()
+        val snapshot = ProjectSerializer.canonicalSnapshot(project)
         withContext(Dispatchers.IO) {
-            autosaveFiles.write("autosave", ProjectSerializer.encode(snapshot)) {
-                ProjectSerializer.decode(it) != null
-            }
+            autosaveFiles.write("autosave", ProjectSerializer.encode(snapshot), ProjectSerializer::isValidForStorage)
         }
     }
 
     suspend fun loadAutosave(): FallenProject? = withContext(Dispatchers.IO) {
-        autosaveFiles.read("autosave", ProjectSerializer::decode)
+        autosaveFiles.read("autosave", ProjectSerializer::decodeForStorage)
     }
 
     suspend fun clearAutosave(): Boolean = withContext(Dispatchers.IO) {

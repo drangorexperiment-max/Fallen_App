@@ -1,12 +1,12 @@
 package com.fallen.studio.data.model
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 // ============================================================
-// Модели данных Fallen.
-// Формат на 100% совместим с .uiproj из UI Studio Pro (HTML):
-//   { version, name, created, canvas:{w,h}, assets:[], elements:[], fonts:[], counter }
+// Модели данных Fallen: v4 хранит экранные ноды и переходы.
+// Поддерживаемые legacy .uiproj / .fallen (v1..3) мигрирует ProjectGraph.
+// canvas/elements в корне v4 — совместимое зеркало активного экрана,
+// а не независимый холст. Произвольные варианты .uiproj не гарантируются.
 // ============================================================
 
 /** Размер холста */
@@ -82,19 +82,46 @@ data class CanvasElement(
     val isImage: Boolean get() = type == "image"
 }
 
+/** Экран со своей геометрией и локальными ID экземпляров элементов. */
+@Serializable
+data class ScreenNode(
+    val id: String,
+    val name: String,
+    val canvas: CanvasSize = CanvasSize(),
+    val elements: List<CanvasElement> = emptyList(),
+)
+
+@Serializable
+enum class TransitionKind { OPEN_SCREEN, BACK }
+
+/** Одна click-action на пару (fromNodeId, elementId); BACK не имеет target. */
+@Serializable
+data class NodeTransition(
+    val id: String,
+    val fromNodeId: String,
+    val elementId: String,
+    val kind: TransitionKind = TransitionKind.OPEN_SCREEN,
+    val toNodeId: String? = null,
+)
+
 /** Проект целиком — корневой объект .uiproj / .fallen файла */
 @Serializable
 data class FallenProject(
-    val version: Int = 3,
+    val version: Int = 4,
     val id: String? = null,
     val name: String = "Untitled",
     val created: String = "",
     val modified: String? = null,
+    /** Legacy-зеркало активного экрана; в v4 источником истины служат nodes. */
     val canvas: CanvasSize = CanvasSize(),
     val assets: List<Asset> = emptyList(),
     val elements: List<CanvasElement> = emptyList(),
     val fonts: List<ProjectFont> = emptyList(),
     val counter: Int = 0,
+    val nodes: List<ScreenNode> = emptyList(),
+    val startNodeId: String? = null,
+    val activeNodeId: String? = null,
+    val transitions: List<NodeTransition> = emptyList(),
 )
 
 /** Краткая информация о проекте для списка на главном экране */
@@ -110,20 +137,23 @@ data class ProjectSummary(
     val canvasH: Int,
     /** src первого image-ассета для миниатюры (data URL) */
     val thumbnailSrc: String?,
+    val nodeCount: Int = 1,
 )
 
 fun FallenProject.toSummary(): ProjectSummary {
-    val texts = elements.count { it.isText }
+    val project = ProjectGraph.normalize(this)
+    val elements = project.nodes.flatMap { it.elements }
     return ProjectSummary(
-        id = id ?: "",
-        name = name,
-        created = created,
-        modified = modified,
+        id = project.id ?: "",
+        name = project.name,
+        created = project.created,
+        modified = project.modified,
         elementCount = elements.size,
-        textCount = texts,
-        imageCount = elements.size - texts,
-        canvasW = canvas.w,
-        canvasH = canvas.h,
-        thumbnailSrc = assets.firstOrNull()?.src,
+        textCount = elements.count { it.isText },
+        imageCount = elements.count { it.isImage },
+        canvasW = project.canvas.w,
+        canvasH = project.canvas.h,
+        thumbnailSrc = project.assets.firstOrNull()?.src,
+        nodeCount = project.nodes.size,
     )
 }
