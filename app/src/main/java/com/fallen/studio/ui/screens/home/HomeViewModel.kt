@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.fallen.studio.data.ProjectRepository
 import com.fallen.studio.data.model.ProjectSummary
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,8 +31,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
-    fun refresh() {
+    /** Ошибка хранилища не должна завершать Home или заменять прежний список пустым. */
+    private fun launchOperation(errorMessage: String, operation: suspend () -> Unit) {
         viewModelScope.launch {
+            try {
+                operation()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                _state.value = _state.value.copy(isLoading = false, toast = errorMessage)
+            }
+        }
+    }
+
+    fun refresh() {
+        _state.value = _state.value.copy(isLoading = true)
+        launchOperation("Не удалось обновить список проектов. Попробуйте ещё раз.") {
             repository.refresh()
             _state.value = _state.value.copy(
                 projects = repository.summaries.value,
@@ -41,7 +56,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteProject(id: String) {
-        viewModelScope.launch {
+        launchOperation("Не удалось удалить проект. Проверьте доступ к хранилищу.") {
             repository.delete(id)
             _state.value = _state.value.copy(
                 projects = repository.summaries.value,
@@ -51,32 +66,29 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun duplicateProject(id: String) {
-        viewModelScope.launch {
-            repository.duplicate(id)
+        launchOperation("Не удалось создать копию проекта. Исходный проект не изменён.") {
+            val idOfCopy = repository.duplicate(id)
             _state.value = _state.value.copy(
                 projects = repository.summaries.value,
-                toast = "Проект дублирован",
+                toast = if (idOfCopy == null) "Проект не найден или не может быть прочитан" else "Проект дублирован",
             )
         }
     }
 
     fun renameProject(id: String, newName: String) {
-        viewModelScope.launch {
+        launchOperation("Не удалось переименовать проект. Попробуйте ещё раз.") {
             repository.rename(id, newName.ifBlank { "Мой проект" })
             _state.value = _state.value.copy(projects = repository.summaries.value)
         }
     }
 
-    /**
-     * Экспорт проекта в файл (.fallen), чтобы передать другому
-     * человеку — он сможет импортировать его у себя.
-     */
+    /** Экспорт полного проекта, который можно импортировать на другом устройстве. */
     fun exportProject(id: String, uri: Uri) {
-        viewModelScope.launch {
+        launchOperation("Не удалось экспортировать проект. Исходный проект не изменён.") {
             val project = repository.load(id)
             if (project == null) {
                 _state.value = _state.value.copy(toast = "Проект не найден")
-                return@launch
+                return@launchOperation
             }
             val ok = repository.exportToUri(project, uri)
             _state.value = _state.value.copy(
@@ -85,18 +97,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Импорт файла проекта (.fallen, старого .uiproj или .json).
-     * Проект сохраняется и сразу открывается.
-     */
+    /** Импорт открывается только после успешного сохранения отдельной копии. */
     fun importProject(uri: Uri) {
-        viewModelScope.launch {
+        launchOperation("Не удалось сохранить импортированный проект. Проверьте свободное место.") {
             val project = repository.importFromUri(uri)
             if (project == null) {
                 _state.value = _state.value.copy(
                     toast = "Не удалось прочитать файл. Поддерживаются .fallen, .uiproj и .json",
                 )
-                return@launch
+                return@launchOperation
             }
             val id = repository.save(project.copy(id = null))
             _state.value = _state.value.copy(

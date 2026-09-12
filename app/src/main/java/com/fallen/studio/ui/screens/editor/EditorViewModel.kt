@@ -15,17 +15,20 @@ import com.fallen.studio.data.model.ProjectFont
 import com.fallen.studio.util.FontManager
 import com.fallen.studio.util.Haptics
 import com.fallen.studio.util.ImageUtils
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
-/** Какая нижняя панель открыта */
-enum class EditorPanel { NONE, ASSETS, TEXT, LAYERS, PROPERTIES, EXPORT }
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Эффективный шаг сетки: подстраивается под разрешение холста так,
@@ -37,26 +40,6 @@ fun effectiveGridStep(canvasSide: Int, gridSize: Int): Float {
     val base = gridSize.coerceAtLeast(10).toFloat()
     val cells = Math.round(canvasSide / base).coerceAtLeast(1)
     return canvasSide / cells.toFloat()
-}
-
-/** Состояние редактора */
-data class EditorState(
-    val projectId: String? = null,
-    val projectName: String = "Мой проект",
-    val canvas: CanvasSize = CanvasSize(),
-    val assets: List<Asset> = emptyList(),
-    val elements: List<CanvasElement> = emptyList(),
-    val fonts: List<ProjectFont> = emptyList(),
-    val counter: Int = 0,
-    val selectedId: String? = null,
-    val activePanel: EditorPanel = EditorPanel.NONE,
-    val canUndo: Boolean = false,
-    val canRedo: Boolean = false,
-    val isDirty: Boolean = false,
-    val toast: String? = null,
-) {
-    val selectedElement: CanvasElement?
-        get() = elements.find { it.id == selectedId }
 }
 
 /** Снимок для undo/redo */
@@ -81,100 +64,269 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
 
     private val undoStack = ArrayDeque<Snapshot>()
     private val redoStack = ArrayDeque<Snapshot>()
-    private var autosaveJob: Job? = null
+    private val saveMutex = Mutex()
+    private var loadJob: Job? = null
+    private var sessionInitialized = false
+    private var nextSessionId = 0L
+    private var autosaveGeneration = 0L
+    private var exitRequestConsumed = false
+    private var loadRequest: LoadRequest? = null
+
+    private data class LoadRequest(val id: String?, val canvasW: Int, val canvasH: Int)
+
+    init {
+        startAutosave()
+    }
 
     // ---------- Загрузка / сохранение ----------
 
+    /**
+     * Одна ViewModel принадлежит одной записи навигации. Повторный LaunchedEffect
+     * после recreation не заменяет активную RAM-сессию (включая новый проект без ID).
+     * Это не восстановление несохранённого черновика после завершения процесса.
+     */
     fun loadProject(id: String?, canvasW: Int = 0, canvasH: Int = 0) {
-        viewModelScope.launch {
-            if (id == null) {
-                val s = settings.value
-                _state.value = EditorState(
-                    canvas = CanvasSize(
-                        if (canvasW > 0) canvasW else s.defaultCanvasW,
-                        if (canvasH > 0) canvasH else s.defaultCanvasH,
-                    ),
-                )
-            } else {
-                val project = repository.load(id) ?: return@launch
-                applyProject(project)
+        if (sessionInitialized) return
+        sessionInitialized = true
+        val request = LoadRequest(id, canvasW, canvasH)
+        loadRequest = request
+        beginLoad(request)
+    }
+
+    fun retryLoadProject() {
+        val request = loadRequest ?: return
+        if (_state.value.isLoading || _state.value.isSessionReady || _state.value.isExitRequested) return
+        beginLoad(request)
+    }
+
+    private fun beginLoad(request: LoadRequest) {
+        loadJob?.cancel()
+        val sessionId = ++nextSessionId
+        exitRequestConsumed = false
+        undoStack.clear()
+        redoStack.clear()
+        _state.value = EditorState(sessionId = sessionId, isLoading = true)
+        loadJob = viewModelScope.launch {
+            try {
+                val project = if (request.id == null) {
+                    val config = settings.value
+                    FallenProject(
+                        name = "Мой проект",
+                        canvas = CanvasSize(
+                            if (request.canvasW > 0) request.canvasW else config.defaultCanvasW,
+                            if (request.canvasH > 0) request.canvasH else config.defaultCanvasH,
+                        ),
+                    )
+                } else {
+                    repository.load(request.id)
+                }
+                if (_state.value.sessionId != sessionId || _state.value.isExitRequested) return@launch
+                if (project == null) {
+                    _state.value = _state.value.copy(
+                        loadError = "Не удалось открыть проект. Файл отсутствует, повреждён или недоступен.",
+                    )
+                } else {
+                    applyProject(project, sessionId)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                if (_state.value.sessionId == sessionId) {
+                    _state.value = _state.value.copy(loadError = "Не удалось открыть проект. Попробуйте ещё раз.")
+                }
+            } finally {
+                if (_state.value.sessionId == sessionId) {
+                    _state.value = _state.value.copy(isLoading = false)
+                }
             }
-            undoStack.clear()
-            redoStack.clear()
-            updateUndoRedoFlags()
-            startAutosave()
         }
     }
 
     fun importProject(project: FallenProject) {
-        applyProject(project.copy(id = null))
+        loadJob?.cancel()
+        sessionInitialized = true
+        loadRequest = null
+        exitRequestConsumed = false
+        applyProject(project.copy(id = null), ++nextSessionId)
+        _state.value = _state.value.withProjectEdit()
         undoStack.clear()
         redoStack.clear()
         updateUndoRedoFlags()
         showToast("Проект импортирован")
     }
 
-    private fun applyProject(project: FallenProject) {
-        _state.value = EditorState(
-            projectId = project.id,
-            projectName = project.name,
-            canvas = project.canvas,
-            assets = project.assets,
-            elements = project.elements.sortedBy { it.z },
-            fonts = project.fonts,
-            counter = project.counter,
-        )
+    private fun applyProject(project: FallenProject, sessionId: Long) {
+        _state.value = project.toEditorState(sessionId)
     }
 
-    fun currentProject(): FallenProject {
-        val s = _state.value
-        return FallenProject(
-            id = s.projectId,
-            name = s.projectName,
-            canvas = s.canvas,
-            assets = s.assets,
-            elements = s.elements,
-            fonts = s.fonts,
-            counter = s.counter,
-        )
-    }
+    fun currentProject(): FallenProject = _state.value.toProjectSnapshot()
 
+    /** onSaved подтверждает записанный снимок; новые правки могут всё ещё быть dirty. */
     fun saveProject(name: String? = null, onSaved: (String) -> Unit = {}) {
+        requestSave(name = name, onSaved = onSaved)
+    }
+
+    fun saveAndExit() {
+        if (!_state.value.showExitDialog) return
+        requestSave(exitAfterSave = true)
+    }
+
+    private fun requestSave(
+        name: String? = null,
+        exitAfterSave: Boolean = false,
+        onSaved: (String) -> Unit = {},
+    ) {
+        val s = _state.value
+        if (!s.isSessionReady || s.isExitRequested || s.isManualSavePending) return
+        // Имя — такая же правка проекта: при ошибке оно остаётся в dirty-черновике.
+        val edited = if (name != null && name != s.projectName) {
+            s.copy(projectName = name).withProjectEdit()
+        } else s
+        val sessionId = edited.sessionId
+        // Устанавливаем до launch, чтобы быстрые повторные нажатия не ставили save в очередь.
+        _state.value = edited.copy(isManualSavePending = true, saveError = null)
         viewModelScope.launch {
-            val project = currentProject().let {
-                if (name != null) it.copy(name = name) else it
+            try {
+                val saved = persistProject(sessionId, automatic = false) ?: return@launch
+                if (_state.value.sessionId != sessionId || _state.value.isExitRequested) return@launch
+                val hasNewEdits = _state.value.isDirty
+                _state.value = _state.value.copy(showSaveDialog = false)
+                if (exitAfterSave) {
+                    if (hasNewEdits) {
+                        _state.value = _state.value.copy(
+                            saveError = "Во время сохранения появились новые изменения. Сохраните их перед выходом.",
+                        )
+                    } else {
+                        leaveEditor()
+                    }
+                }
+                haptic(strong = true)
+                showToast(if (hasNewEdits) "Снимок сохранён. Есть новые несохранённые изменения." else "Проект сохранён")
+                onSaved(requireNotNull(saved.id))
+            } finally {
+                if (_state.value.sessionId == sessionId) {
+                    _state.value = _state.value.copy(isManualSavePending = false)
+                }
             }
-            val id = repository.save(project)
-            _state.value = _state.value.copy(
-                projectId = id,
-                projectName = project.name,
-                isDirty = false,
-            )
-            haptic(strong = true)
-            showToast("Проект сохранён")
-            onSaved(id)
         }
     }
 
     /**
-     * ИСПРАВЛЕНИЕ АВТОСОХРАНЕНИЯ: раньше автосейв писал проект в отдельный
-     * скрытый файл, который не показывался на главном экране. Теперь каждое
-     * изменение (с небольшой задержкой-дебаунсом) сохраняет проект как
-     * обычный — он сразу появляется в списке «Мои проекты».
+     * Общая очередь manual/auto. Снимок берётся ПОСЛЕ захвата mutex: ожидающий save
+     * увидит ID и metadata первой записи нового проекта, а не создаст дубликат.
      */
+    private suspend fun persistProject(
+        sessionId: Long,
+        automatic: Boolean,
+        expectedRevision: Long? = null,
+        expectedAutosaveGeneration: Long? = null,
+    ): FallenProject? = saveMutex.withLock {
+        val s = _state.value
+        if (s.sessionId != sessionId || !s.isSessionReady || s.isExitRequested) return@withLock null
+        if (automatic && (!settings.value.autosaveEnabled || !s.isDirty || s.showExitDialog ||
+                s.isManualSavePending || s.revision != expectedRevision ||
+                expectedAutosaveGeneration != autosaveGeneration)
+        ) return@withLock null
+        val token = s.saveToken()
+        val snapshot = s.toProjectSnapshot()
+        _state.value = s.copy(isSaving = true, saveError = null)
+        try {
+            val saved = repository.saveSnapshot(snapshot)
+            _state.value = reconcileSavedProject(_state.value, token, saved)
+            saved
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            if (_state.value.sessionId == sessionId) {
+                _state.value = _state.value.copy(
+                    saveError = "Не удалось сохранить проект. Изменения остаются в редакторе; попробуйте ещё раз.",
+                )
+            }
+            null
+        } finally {
+            if (_state.value.sessionId == sessionId) {
+                _state.value = _state.value.copy(isSaving = false)
+            }
+        }
+    }
+
+    /** Отменяется только таймер debounce, но не уже начавшаяся запись в хранилище. */
     private fun startAutosave() {
-        autosaveJob?.cancel()
-        autosaveJob = viewModelScope.launch {
-            _state.collect { s ->
-                if (settings.value.autosaveEnabled && s.isDirty) {
-                    delay(1500) // дебаунс: ждём паузу в действиях
-                    if (_state.value.isDirty && settings.value.autosaveEnabled) {
-                        val id = repository.save(currentProject())
-                        _state.value = _state.value.copy(projectId = id, isDirty = false)
+        viewModelScope.launch {
+            _state.combine(settings) { s, config ->
+                s.autosaveToken(config.autosaveEnabled)
+            }.distinctUntilChanged().collectLatest { token ->
+                val generation = ++autosaveGeneration
+                if (token != null) {
+                    delay(1500)
+                    // Не дочерняя задача collectLatest: новая правка не отменяет IO
+                    // между присвоением нового ID на диске и reconciliation в RAM.
+                    viewModelScope.launch {
+                        persistProject(
+                            token.sessionId,
+                            automatic = true,
+                            expectedRevision = token.revision,
+                            expectedAutosaveGeneration = generation,
+                        )
                     }
                 }
             }
         }
+    }
+
+    fun openSaveDialog() {
+        val s = _state.value
+        if (!s.isSessionReady || s.saveInProgress || s.isExitRequested || s.showExitDialog) return
+        _state.value = s.copy(showSaveDialog = true, saveError = null)
+    }
+
+    fun dismissSaveDialog() {
+        if (!_state.value.isManualSavePending) {
+            _state.value = _state.value.copy(showSaveDialog = false)
+        }
+    }
+
+    fun dismissSaveError() {
+        if (!_state.value.saveInProgress) _state.value = _state.value.copy(saveError = null)
+    }
+
+    fun requestExit() {
+        val s = _state.value
+        when {
+            s.isExitRequested -> Unit
+            s.activePanel != EditorPanel.NONE -> closePanel()
+            s.showSaveDialog -> dismissSaveDialog()
+            s.isDirty || s.saveInProgress -> _state.value = s.copy(showExitDialog = true)
+            else -> leaveEditor()
+        }
+    }
+
+    fun dismissExitDialog() {
+        if (!_state.value.isManualSavePending) {
+            _state.value = _state.value.copy(showExitDialog = false)
+        }
+    }
+
+    fun discardAndExit() {
+        // Уже начавшуюся запись нельзя выдать за отменённую. Ждём её завершения.
+        if (_state.value.saveInProgress) return
+        leaveEditor()
+    }
+
+    private fun leaveEditor() {
+        loadJob?.cancel()
+        _state.value = _state.value.copy(
+            isExitRequested = true,
+            showSaveDialog = false,
+            showExitDialog = false,
+        )
+    }
+
+    /** Навигацию выполняет текущий экран, а не callback, захваченный до recreation. */
+    fun consumeExitRequest(): Boolean {
+        if (!_state.value.isExitRequested || exitRequestConsumed) return false
+        exitRequestConsumed = true
+        return true
     }
 
     // ---------- Undo / Redo ----------
@@ -215,8 +367,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             fonts = snapshot.fonts,
             counter = snapshot.counter,
             selectedId = if (snapshot.elements.any { it.id == selected }) selected else null,
-            isDirty = true,
-        )
+        ).withProjectEdit()
         updateUndoRedoFlags()
     }
 
@@ -232,7 +383,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
     fun setCanvasSize(w: Int, h: Int) {
         if (w < 100 || h < 100 || w > 10000 || h > 10000) return
         pushUndo()
-        _state.value = _state.value.copy(canvas = CanvasSize(w, h), isDirty = true)
+        _state.value = _state.value.copy(canvas = CanvasSize(w, h)).withProjectEdit()
     }
 
     // ---------- Выделение и панели ----------
@@ -278,8 +429,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             )
             _state.value = _state.value.copy(
                 assets = _state.value.assets + asset,
-                isDirty = true,
-            )
+            ).withProjectEdit()
             showToast("Ассет «$name» добавлен")
         }
     }
@@ -293,8 +443,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             elements = _state.value.elements.map {
                 if (it.assetId == id) it.copy(name = newName) else it
             },
-            isDirty = true,
-        )
+        ).withProjectEdit()
     }
 
     fun deleteAsset(id: String) {
@@ -305,16 +454,16 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             assets = s.assets.filter { it.id != id },
             elements = remainingElements,
             selectedId = if (remainingElements.any { it.id == s.selectedId }) s.selectedId else null,
-            isDirty = true,
-        )
+        ).withProjectEdit()
         showToast("Ассет удалён")
     }
 
     /** Добавить экземпляр ассета на канвас */
     fun placeAsset(assetId: String) {
-        val s = _state.value
-        val asset = s.assets.find { it.id == assetId } ?: return
+        val asset = _state.value.assets.find { it.id == assetId } ?: return
         pushUndo()
+        // Берём состояние после pushUndo, чтобы не вернуть устаревшие canUndo/canRedo.
+        val s = _state.value
         val counter = s.counter + 1
 
         // Определяем реальные пропорции изображения
@@ -352,8 +501,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             counter = counter,
             selectedId = element.id,
             activePanel = EditorPanel.NONE,
-            isDirty = true,
-        )
+        ).withProjectEdit()
         haptic(strong = true)
         showToast("«${asset.name}» добавлен")
     }
@@ -376,8 +524,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             pushUndo()
             _state.value = _state.value.copy(
                 fonts = _state.value.fonts + font,
-                isDirty = true,
-            )
+            ).withProjectEdit()
             showToast("Шрифт «${font.name}» добавлен")
         }
     }
@@ -395,8 +542,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     it.copy(fontFamily = "Inter")
                 } else it
             },
-            isDirty = true,
-        )
+        ).withProjectEdit()
         showToast("Шрифт удалён")
     }
 
@@ -461,8 +607,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             counter = counter,
             selectedId = fitted.id,
             activePanel = EditorPanel.NONE,
-            isDirty = true,
-        )
+        ).withProjectEdit()
         haptic(strong = true)
         showToast("Текст добавлен")
     }
@@ -509,8 +654,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             elements = _state.value.elements.map {
                 if (it.id == id) fitTextBox(transform(it)) else it
             },
-            isDirty = true,
-        )
+        ).withProjectEdit()
     }
 
     // Сырая (не «примагниченная») позиция элеме��та во время жеста.
@@ -570,8 +714,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             elements = s.elements.map {
                 if (it.id == id) it.copy(x = nx, y = ny) else it
             },
-            isDirty = true,
-        )
+        ).withProjectEdit()
     }
 
     /**
@@ -663,8 +806,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 } else el
             },
-            isDirty = true,
-        )
+        ).withProjectEdit()
     }
 
     // Размеры и шрифт элемента на старте жеста масштабирования
@@ -716,8 +858,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 } else it
             },
-            isDirty = true,
-        )
+        ).withProjectEdit()
     }
 
     // Угол элемента на старте жеста поворота (за кругляшок над рамкой)
@@ -746,8 +887,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             elements = s.elements.map {
                 if (it.id == id) it.copy(rotation = angle) else it
             },
-            isDirty = true,
-        )
+        ).withProjectEdit()
     }
 
     /** Переименование элемента (слоя) */
@@ -767,16 +907,15 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _state.value = s.copy(
             elements = s.elements.filter { it.id != id },
             selectedId = if (s.selectedId == id) null else s.selectedId,
-            isDirty = true,
-        )
+        ).withProjectEdit()
         haptic(strong = true)
         showToast("Элемент удалён")
     }
 
     fun duplicateElement(id: String) {
-        val s = _state.value
-        val original = s.elements.find { it.id == id } ?: return
+        val original = _state.value.elements.find { it.id == id } ?: return
         pushUndo()
+        val s = _state.value
         val counter = s.counter + 1
         // Имя дубликата совпадает с оригиналом — без суффикса «_copy»
         val copy = original.copy(
@@ -791,8 +930,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
             elements = s.elements + copy,
             counter = counter,
             selectedId = copy.id,
-            isDirty = true,
-        )
+        ).withProjectEdit()
         haptic(strong = true)
         showToast("Элемент дублирован")
     }
@@ -814,8 +952,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         sorted[target] = tmp
         _state.value = _state.value.copy(
             elements = sorted.mapIndexed { i, el -> el.copy(z = i) },
-            isDirty = true,
-        )
+        ).withProjectEdit()
         haptic()
     }
 
@@ -824,8 +961,7 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         _state.value = _state.value.copy(
             elements = emptyList(),
             selectedId = null,
-            isDirty = true,
-        )
+        ).withProjectEdit()
         haptic(strong = true)
         showToast("Холст очищен")
     }

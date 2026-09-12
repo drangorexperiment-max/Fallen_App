@@ -3,11 +3,21 @@ name: Build Fallen APK
 on:
   push:
     branches: [main, master]
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,8 +33,22 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Regression tests and debug APK
+        run: gradle testDebugUnitTest assembleDebug --no-daemon --stacktrace
+
+      - name: Android Lint
+        run: gradle lintDebug --no-daemon --stacktrace
+
+      - name: Upload validation reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: fallen-validation-reports
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.*
+          if-no-files-found: warn
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

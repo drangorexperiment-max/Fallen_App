@@ -1,5 +1,6 @@
 package com.fallen.studio.ui.screens.editor
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +56,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,7 +67,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.withResumed
 import com.fallen.studio.ui.screens.editor.panels.AssetsPanel
 import com.fallen.studio.ui.screens.editor.panels.ExportPanel
 import com.fallen.studio.ui.screens.editor.panels.LayersPanel
@@ -91,6 +97,10 @@ fun EditorScreen(
     val settings by viewModel.settings.collectAsState()
     val colors = FallenTheme.colors
     val snackbarHostState = remember { SnackbarHostState() }
+    val currentOnBack by rememberUpdatedState(onBack)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val canEdit = state.isSessionReady && !state.isExitRequested
+    val canSave = canEdit && !state.saveInProgress
 
     // Лаунчер выбора файла шрифта (.ttf / .otf)
     val fontPickerLauncher = rememberLauncherForActivityResult(
@@ -102,11 +112,31 @@ fun EditorScreen(
     // Счётчик нажатий кнопки «по центру» — триггер повторного центрирования
     var recenterTrigger by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var showClearDialog by remember { mutableStateOf(false) }
-    var showSaveDialog by remember { mutableStateOf(false) }
     var showCanvasSizeDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(projectId) {
+    LaunchedEffect(viewModel, projectId) {
         viewModel.loadProject(projectId, initialCanvasW, initialCanvasH)
+    }
+
+    LaunchedEffect(viewModel, lifecycleOwner, state.isExitRequested) {
+        if (state.isExitRequested) {
+            // popBackStackSafe принимает выход только из RESUMED; не теряем запрос
+            // после recreation или во время навигационной анимации.
+            lifecycleOwner.lifecycle.withResumed {
+                if (viewModel.consumeExitRequest()) currentOnBack()
+            }
+        }
+    }
+
+    // У sheet и диалогов собственный Back. На самом экране системный и toolbar
+    // Back проходят через одну проверку dirty в ViewModel.
+    BackHandler(
+        enabled = state.activePanel == EditorPanel.NONE &&
+            !state.showSaveDialog && !state.showExitDialog &&
+            !showClearDialog && !showCanvasSizeDialog &&
+            state.loadError == null && state.saveError == null,
+    ) {
+        viewModel.requestExit()
     }
 
     LaunchedEffect(state.toast) {
@@ -136,13 +166,15 @@ fun EditorScreen(
         ) {
             // ---------- Верхняя панель ----------
             EditorTopBar(
-                canUndo = state.canUndo,
-                canRedo = state.canRedo,
+                canUndo = canEdit && state.canUndo,
+                canRedo = canEdit && state.canRedo,
                 isDirty = state.isDirty,
-                onBack = onBack,
+                canEdit = canEdit,
+                canSave = canSave,
+                onBack = viewModel::requestExit,
                 onUndo = viewModel::undo,
                 onRedo = viewModel::redo,
-                onSave = { showSaveDialog = true },
+                onSave = viewModel::openSaveDialog,
                 onCanvasSize = { showCanvasSizeDialog = true },
                 onClear = { showClearDialog = true },
                 canvasLabel = "${state.canvas.w} × ${state.canvas.h}",
@@ -155,23 +187,28 @@ fun EditorScreen(
                     .weight(1f)
                     .clipToBounds(),
             ) {
-                EditorCanvas(
-                    state = state,
-                    settings = settings,
-                    colors = colors,
-                    isDarkTheme = isDarkTheme,
-                    onSelect = viewModel::select,
-                    onBeginGesture = viewModel::beginGesture,
-                    onMove = viewModel::moveElement,
-                    onResize = viewModel::resizeElement,
-                    onBeginScaleGesture = viewModel::beginScaleGesture,
-                    onScale = viewModel::scaleElement,
-                    onBeginRotateGesture = viewModel::beginRotateGesture,
-                    onRotate = { id, delta -> viewModel.rotateElement(id, delta) },
-                    onViewTransform = { viewScale = it },
-                    recenterTrigger = recenterTrigger,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                // Не разрешаем редактировать временный пустой state, пока идёт load.
+                if (canEdit) {
+                    EditorCanvas(
+                        state = state,
+                        settings = settings,
+                        colors = colors,
+                        isDarkTheme = isDarkTheme,
+                        onSelect = viewModel::select,
+                        onBeginGesture = viewModel::beginGesture,
+                        onMove = viewModel::moveElement,
+                        onResize = viewModel::resizeElement,
+                        onBeginScaleGesture = viewModel::beginScaleGesture,
+                        onScale = viewModel::scaleElement,
+                        onBeginRotateGesture = viewModel::beginRotateGesture,
+                        onRotate = { id, delta -> viewModel.rotateElement(id, delta) },
+                        onViewTransform = { viewScale = it },
+                        recenterTrigger = recenterTrigger,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else if (state.isLoading) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                }
 
                 // Индикатор масштаба + кнопка «вернуть холст по центру»
                 Row(
@@ -220,14 +257,15 @@ fun EditorScreen(
                 assetsCount = state.assets.size,
                 layersCount = state.elements.size,
                 hasSelection = state.selectedElement != null,
-                onOpenPanel = viewModel::openPanel,
+                onOpenPanel = { if (canEdit) viewModel.openPanel(it) },
             )
         }
     }
 
     // ---------- Выезжающие панели ----------
     if (state.activePanel != EditorPanel.NONE) {
-        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+        // Без промежуточного состояния системный Back закрывает sheet за один шаг.
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = viewModel::closePanel,
             sheetState = sheetState,
@@ -292,6 +330,70 @@ fun EditorScreen(
     }
 
     // ---------- Диалоги ----------
+    state.loadError?.let { message ->
+        AlertDialog(
+            onDismissRequest = viewModel::requestExit,
+            title = { Text("Не удалось открыть проект") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = viewModel::retryLoadProject, enabled = !state.isLoading) {
+                    Text("Повторить")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::requestExit) { Text("Назад") }
+            },
+        )
+    }
+
+    if (state.showExitDialog) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissExitDialog,
+            title = { Text("Выйти из редактора?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (state.isDirty) "В проекте есть несохранённые изменения."
+                        else "Текущие изменения уже сохранены.",
+                    )
+                    if (state.saveInProgress) Text("Дождитесь окончания сохранения.")
+                    state.saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::saveAndExit, enabled = canSave) {
+                    Text(if (state.saveInProgress) "Сохранение…" else "Сохранить и выйти")
+                }
+            },
+            dismissButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = viewModel::discardAndExit, enabled = !state.saveInProgress) {
+                        Text("Выйти без сохранения")
+                    }
+                    TextButton(onClick = viewModel::dismissExitDialog, enabled = !state.isManualSavePending) {
+                        Text("Остаться")
+                    }
+                }
+            },
+        )
+    }
+
+    if (state.saveError != null && !state.showSaveDialog && !state.showExitDialog) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissSaveError,
+            title = { Text("Не удалось сохранить проект") },
+            text = { Text(state.saveError.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.saveProject() }, enabled = canSave) { Text("Повторить") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissSaveError, enabled = !state.saveInProgress) {
+                    Text("Закрыть")
+                }
+            },
+        )
+    }
+
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
@@ -309,28 +411,34 @@ fun EditorScreen(
         )
     }
 
-    if (showSaveDialog) {
-        var name by remember { mutableStateOf(state.projectName) }
+    if (state.showSaveDialog) {
+        var name by rememberSaveable(state.sessionId) { mutableStateOf(state.projectName) }
         AlertDialog(
-            onDismissRequest = { showSaveDialog = false },
+            onDismissRequest = viewModel::dismissSaveDialog,
             title = { Text("Сохранить проект") },
             text = {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Название проекта") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Название проекта") },
+                        singleLine = true,
+                        enabled = !state.isManualSavePending,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    state.saveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.saveProject(name.ifBlank { "Мой проект" })
-                    showSaveDialog = false
-                }) { Text("Сохранить") }
+                TextButton(
+                    onClick = { viewModel.saveProject(name.ifBlank { "Мой проект" }) },
+                    enabled = canSave,
+                ) { Text(if (state.saveInProgress) "Сохранение…" else "Сохранить") }
             },
             dismissButton = {
-                TextButton(onClick = { showSaveDialog = false }) { Text("Отмена") }
+                TextButton(onClick = viewModel::dismissSaveDialog, enabled = !state.isManualSavePending) {
+                    Text("Отмена")
+                }
             },
         )
     }
@@ -407,6 +515,8 @@ private fun EditorTopBar(
     canUndo: Boolean,
     canRedo: Boolean,
     isDirty: Boolean,
+    canEdit: Boolean,
+    canSave: Boolean,
     canvasLabel: String,
     onBack: () -> Unit,
     onUndo: () -> Unit,
@@ -449,7 +559,7 @@ private fun EditorTopBar(
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onCanvasSize)
+                        .clickable(enabled = canEdit, onClick = onCanvasSize)
                         .padding(horizontal = 6.dp, vertical = 4.dp),
                 )
                 if (isDirty) {
@@ -476,18 +586,18 @@ private fun EditorTopBar(
                     tint = if (canRedo) MaterialTheme.colorScheme.onSurface else colors.textDisabled,
                 )
             }
-            IconButton(onClick = onClear) {
+            IconButton(onClick = onClear, enabled = canEdit) {
                 Icon(
                     Icons.Outlined.DeleteSweep,
                     contentDescription = "Очистить холст",
                     tint = colors.textSecondary,
                 )
             }
-            IconButton(onClick = onSave) {
+            IconButton(onClick = onSave, enabled = canSave) {
                 Icon(
                     Icons.Outlined.Save,
                     contentDescription = "Сохранить проект",
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = if (canSave) MaterialTheme.colorScheme.primary else colors.textDisabled,
                 )
             }
         }
